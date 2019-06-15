@@ -1,0 +1,14 @@
+{
+    "include": [
+        "src/*.js",
+        "lib.d.ts"
+    ],
+    "compilerOptions": {
+        "target": "es5",
+        "module": "es2015",
+        "checkJs": true, 
+        "allowJs": true,
+        "outDir": "dist/bench",
+        "removeComments": true
+    }
+}

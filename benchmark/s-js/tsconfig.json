@@ -1,0 +1,13 @@
+{
+    "include": [
+        "src/S.ts",
+        "src/withsubclocks.ts"
+    ],
+    "compilerOptions": {
+        "target": "es5",
+        "module": "ES2015",
+        "strict": true,
+        "outDir": "dist/es",
+        "declaration": true
+    }
+}

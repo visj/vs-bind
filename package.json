@@ -1,0 +1,25 @@
+{
+  "name": "vs-bind",
+  "version": "0.1.0",
+  "description": "",
+  "entry": "src/index.js",
+  "main": "dist/vs-bind.js",
+  "module": "dist/es/vs-bind.js",
+  "types": "lib.d.ts",
+  "scripts": {
+    "bench": "tsc && rollup -c && rm -r dist/bench",
+    "build": "node util/bundle.js",
+    "test": "jasmine",
+    "dev": "npm run build && npm test"
+  },
+  "keywords": [],
+  "author": "VSjolund",
+  "license": "MIT",
+  "browsersList": "> 0.25%",
+  "devDependencies": {
+    "@types/jasmine": "^3.3.9",
+    "jasmine": "^3.3.1",
+    "rollup": "^1.12.0",
+    "typescript": "^3.4.5"
+  }
+}
