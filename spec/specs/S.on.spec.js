@@ -19,7 +19,7 @@ describe("S.on(...)", function () {
         S.root(function () {
             var d = new Data(1),
                 spy = jasmine.createSpy("spy"),
-                s = S.on(function () { }, function () { spy(); return d.get(); });
+                s = S.on({ get: function() { }}, function () { spy(); return d.get(); });
             expect(spy.calls.count()).toBe(1);
 
             d.set(2);
@@ -34,7 +34,7 @@ describe("S.on(...)", function () {
                 b = new Data(2),
                 c = new Data(3),
                 spy = jasmine.createSpy(),
-                f = S.on(function () { a.get(); b.get(); c.get();  }, function () { spy(); });
+                f = S.on(S.join([a, b, c]), function () { spy(); });
 
             expect(spy.calls.count()).toBe(1);
 
@@ -52,7 +52,7 @@ describe("S.on(...)", function () {
                 b = new Data(2),
                 c = new Data(3),
                 spy = jasmine.createSpy(),
-                f = S.run(S.bind([a, b, c], function () { spy(); }));
+                f = S.on(S.join([a,b,c]), function () { spy(); });
 
             expect(spy.calls.count()).toBe(1);
 
@@ -85,7 +85,7 @@ describe("S.on(...)", function () {
     it("suppresses initial run when onchanges is true", function () {
         S.root(function () {
             var a = new Data(1),
-                c = S.on(a, function (v) { return v * 2; }, 0, true);
+                c = S.on(a, function (v) { return v * 2; }, 0, false, true);
            
             expect(c.get()).toBe(0);
 

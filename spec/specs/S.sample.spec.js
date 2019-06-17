@@ -7,7 +7,7 @@ describe("S.sample(...)", function () {
                 b = new Data(2),
                 c = new Data(3),
                 d = 0,
-                e = S.run(function () { d++; a.get(); S.sample(() => b.get()); c.get(); });
+                e = S.run(function () { d++; a.get(); b.get(true); c.get(); });
                 
             expect(d).toBe(1);
             

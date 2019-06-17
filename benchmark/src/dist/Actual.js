@@ -7,15 +7,30 @@
     var IComputation = (function () {
         function IComputation() {
         }
-        IComputation.prototype.get = function () { };
+        IComputation.prototype.get = function (sample) { };
         return IComputation;
     }());
-    var NoValue = (function () {
-        function NoValue() {
+    var IEnumerable = (function () {
+        function IEnumerable() {
         }
-        return NoValue;
+        return IEnumerable;
     }());
-    var NOT_PENDING = ({});
+    IEnumerable.prototype.length;
+    var IPatcher = (function () {
+        function IPatcher() {
+        }
+        IPatcher.prototype.onSetup = function (ln) { };
+        IPatcher.prototype.onEnter = function (index) { };
+        IPatcher.prototype.onMove = function (from, to, dir) { };
+        IPatcher.prototype.onExit = function (index, final) { };
+        IPatcher.prototype.onUnresolved = function (cStart, cEnd, uStart, uEnd) { };
+        IPatcher.prototype.onTeardown = function () { };
+        IPatcher.prototype.onMutation = function (mutation) { };
+        return IPatcher;
+    }());
+    IPatcher.prototype._current;
+    IPatcher.prototype._updates;
+    IPatcher.prototype._mutation;
 
     var __extends = (undefined && undefined.__extends) || (function () {
         var extendStatics = function (d, b) {
@@ -31,53 +46,41 @@
         };
     })();
     var S = {};
-    var Signal = (function () {
-        function Signal(value) {
-            this._value = value;
-        }
-        Signal.prototype.get = function () {
-            return this._value;
-        };
-        return Signal;
-    }());
-    var Computation = (function (_super) {
-        __extends(Computation, _super);
+    var Computation = (function () {
         function Computation() {
-            var _this = _super.call(this, void 0) || this;
-            _this._fn = null;
-            _this._age = -1;
-            _this._state = 0;
-            _this._onchange = false;
-            _this._source1 = null;
-            _this._source1slot = 0;
-            _this._sources = null;
-            _this._sourceslots = null;
-            _this._ownerslot = -1;
-            _this._dependents = 0;
-            _this._dependentslots = null;
-            _this._log = null;
-            _this._owned = null;
-            _this._cleanups = null;
-            return _this;
+            this._value = null;
+            this._fn = null;
+            this._age = -1;
+            this._state = 0;
+            this._onchange = false;
+            this._comparer = null;
+            this._source1 = null;
+            this._source1slot = 0;
+            this._sources = null;
+            this._sourceslots = null;
+            this._ownerslot = -1;
+            this._dependents = 0;
+            this._dependentslots = null;
+            this._log = null;
+            this._owned = null;
+            this._cleanups = null;
         }
-        Computation.prototype.get = function () {
-            if (Listener !== null) {
+        Computation.prototype.get = function (sample) {
+            if (!sample && Listener != null) {
                 logComputationRead(this);
             }
             return this._value;
         };
         return Computation;
-    }(Signal));
-    var Data = (function (_super) {
-        __extends(Data, _super);
+    }());
+    var Data = (function () {
         function Data(value) {
-            var _this = _super.call(this, value) || this;
-            _this._log = null;
-            _this._pending = NOT_PENDING;
-            return _this;
+            this._value = value;
+            this._log = null;
+            this._pending = NOT_PENDING;
         }
-        Data.prototype.get = function () {
-            if (Listener !== null) {
+        Data.prototype.get = function (sample) {
+            if (!sample && Listener !== null) {
                 logDataRead(this);
             }
             return this._value;
@@ -91,7 +94,7 @@
             this._pending = NOT_PENDING;
         };
         return Data;
-    }(Signal));
+    }());
     var Value = (function (_super) {
         __extends(Value, _super);
         function Value(value, comparer) {
@@ -142,20 +145,23 @@
         };
         return Queue;
     }());
+    var NOT_PENDING = ({});
     var NOT_OWNED = new Computation();
     var RootClock = new Clock();
     var RunningClock = null;
     var Owner = null;
     var Listener = null;
     var Slot = 0;
-    var Escaped = false;
     var Recycled = null;
     S.run = function (fn, seed) {
         return makeComputationNode(fn, seed, getCandidateNode());
     };
-    S.track = function (fn, seed) {
+    S.track = function (fn, seed, comparer) {
         var node = (getCandidateNode());
         node._onchange = true;
+        if (comparer != null) {
+            node._comparer = comparer;
+        }
         return makeComputationNode(fn, seed, node);
     };
     S.root = function (fn) {
@@ -186,41 +192,37 @@
             }
         }
     };
-    S.bind = function (ev, fn, onchanges) {
-        var type = typeof ev === 'function' ? 0 : Array.isArray(ev) ? 1 : 2;
-        return function (value) {
-            if (type === 0) {
-                (ev)();
-            }
-            else if (type === 1) {
-                for (var i = 0, ln = (ev).length; i < ln; i++) {
-                    (ev)[i].get();
+    S.join = function (array) {
+        var ln = array.length;
+        var out = [];
+        return {
+            get: function (sample) {
+                for (var i = 0; i < ln; i++) {
+                    out[i] = array[i].get(sample);
                 }
+                return out;
             }
-            else {
-                (ev).get();
-            }
-            if (onchanges) {
-                onchanges = false;
-            }
-            else {
-                value = S.sample(function () { return fn(value); });
-            }
-            return value;
         };
     };
-    S.on = function (ev, fn, seed, onchanges) {
-        var evFn = typeof ev === 'function';
-        return S.run(function (seed) {
-            var value = evFn ? (ev)() : (ev).get();
+    S.on = function (ev, fn, seed, track, onchanges, comparer) {
+        var on = function (seed) {
+            var result = ev.get();
             if (onchanges) {
                 onchanges = false;
             }
             else {
-                seed = S.sample(function () { return fn(value, seed); });
+                var listener = Listener;
+                try {
+                    Listener = null;
+                    seed = fn(result, seed);
+                }
+                finally {
+                    Listener = listener;
+                }
             }
             return seed;
-        }, seed);
+        };
+        return track ? S.track(on, seed, comparer) : S.run(on, seed);
     };
     S.freeze = function (fn) {
         var result;
@@ -271,16 +273,6 @@
             }
         }
     };
-    S.escape = function (fn) {
-        var escaped = Escaped;
-        try {
-            Escaped = true;
-            return fn();
-        }
-        finally {
-            Escaped = escaped;
-        }
-    };
     S.frozen = function () {
         return RunningClock !== null;
     };
@@ -299,7 +291,7 @@
         if (toplevel) {
             finishToplevelComputation(owner, listener);
         }
-        return recycled ? new Signal(value) : node;
+        return recycled ? { get: function () { return value; } } : node;
     }
     function execToplevelComputation(fn, value) {
         var clock = RootClock;
@@ -391,11 +383,11 @@
     }
     function logComputationRead(node) {
         if ((node._state & 6) !== 0) {
-            var queue = RootClock._updates._items;
-            applyUpstreamUpdates(node, queue);
+            var queue = RootClock._updates;
+            applyUpstreamUpdates(node, queue._items);
         }
         if (node._age === RootClock._time) {
-            if (node._state === 8 && !Escaped) {
+            if (node._state === 8) {
                 throw new Error("Circular dependency.");
             }
             applyComputationUpdate(node);
@@ -504,7 +496,7 @@
         else if ((node._state & 1) !== 0) {
             if (node._onchange) {
                 var current = updateComputation(node);
-                if (node._value !== current) {
+                if (node._comparer != null ? node._comparer(current, node._value) : node._value !== current) {
                     markDownstreamComputations(node, false, true);
                 }
             }
@@ -722,7 +714,7 @@
         });
         List.prototype.set = function (value) {
             this._count = 0;
-            this.enqueue(function (array) {
+            enqueue(this, function (array) {
                 var ln = value.length;
                 for (var i = 0; i < ln; i++) {
                     array[i] = value[i];
@@ -730,10 +722,6 @@
                 array.length = ln;
             });
             return value;
-        };
-        List.prototype.enqueue = function (change) {
-            this._queue[this._count++] = change;
-            _super.prototype.set.call(this, null);
         };
         List.prototype.update = function () {
             var queue = this._queue;
@@ -746,19 +734,19 @@
             this._pending = NOT_PENDING;
         };
         List.prototype.push = function (value) {
-            this.enqueue(function (array, ln) {
+            enqueue(this, function (array, ln) {
                 array[ln] = value;
             });
         };
         List.prototype.pop = function () {
-            this.enqueue(function (array, ln) {
+            enqueue(this, function (array, ln) {
                 if (ln) {
                     array.length--;
                 }
             });
         };
         List.prototype.unshift = function (value) {
-            this.enqueue(function (array, ln) {
+            enqueue(this, function (array, ln) {
                 while (ln) {
                     array[ln--] = array[ln];
                 }
@@ -766,12 +754,12 @@
             });
         };
         List.prototype.shift = function () {
-            this.enqueue(function (array) {
+            enqueue(this, function (array) {
                 array.shift();
             });
         };
         List.prototype.insert = function (index, value) {
-            this.enqueue(function (array, ln) {
+            enqueue(this, function (array, ln) {
                 index = index < 0 ? index + ln : index;
                 if (index >= 0 && index <= ln) {
                     array.splice(index, 0, value);
@@ -779,12 +767,12 @@
             });
         };
         List.prototype.insertRange = function (index, values) {
-            this.enqueue(function (array, ln) {
+            enqueue(this, function (array, ln) {
                 insertRange(array, ln, index, values);
             });
         };
         List.prototype.remove = function (value) {
-            this.enqueue(function (array, ln) {
+            enqueue(this, function (array, ln) {
                 for (var i = 0; i < ln; i++) {
                     if (array[i] === value) {
                         return removeAt(array, i, ln);
@@ -793,17 +781,17 @@
             });
         };
         List.prototype.removeAt = function (index) {
-            this.enqueue(function (array, ln) {
+            enqueue(this, function (array, ln) {
                 removeAt(array, index, ln);
             });
         };
         List.prototype.removeRange = function (from, count) {
-            this.enqueue(function (array, ln) {
+            enqueue(this, function (array, ln) {
                 removeRange(array, ln, from, count);
             });
         };
         List.prototype.replace = function (index, value) {
-            this.enqueue(function (array, ln) {
+            enqueue(this, function (array, ln) {
                 index = index < 0 ? ln + index : index;
                 if (ln && index >= 0 && index < ln) {
                     array[index] = value;
@@ -811,15 +799,12 @@
             });
         };
         List.prototype.move = function (from, to) {
-            this.enqueue(function (array, ln) {
+            enqueue(this, function (array, ln) {
                 move(array, ln, from, to);
             });
         };
         List.prototype.enumerable = function () {
             return new Enumerable(this);
-        };
-        List.prototype.find = function (fn) {
-            return this.enumerable().find(fn);
         };
         List.prototype.forEach = function (fn) {
             return this.enumerable().forEach(fn);
@@ -847,233 +832,60 @@
             this._source = source;
             this._mutation = mutation;
         }
+        Object.defineProperty(Enumerable.prototype, "length", {
+            get: function () {
+                return this.get().length;
+            },
+            enumerable: true,
+            configurable: true
+        });
         Enumerable.prototype.get = function () {
             return this._source.get();
         };
-        Enumerable.prototype.find = function (fn) {
-            var _this = this;
-            var index = null;
-            return S.track(function (prev) {
-                var values = _this.get();
-                var mutation = [];
-                if (mutation !== null && index !== null) {
-                    var nochange = true;
-                    for (var i = 0, ln = mutation.length; nochange && i < ln; i++) {
-                        var _a = mutation[i], id = _a[0], from = _a[1];
-                        nochange = index === -1 ? id < 1 : from > index;
-                    }
-                    if (nochange) {
-                        return prev;
-                    }
-                }
-                for (var i = 0, ln = values.length; i < ln; i++) {
-                    var value = values[i];
-                    if (fn(value, i)) {
-                        index = i;
-                        return value;
-                    }
-                }
-                index = -1;
-                return null;
-            }, (null));
-        };
         Enumerable.prototype.forEach = function (fn) {
-            var source = this._source;
-            var patcher = new ListPatcher(source, fn, this._mutation);
-            S.run(function () { patcher.update(source.get()); });
+            mount(new Patcher(fn, this._mutation), this._source);
         };
         Enumerable.prototype.map = function (fn) {
-            var source = this._source;
-            var patcher = new MapPatcher(source, fn, this._mutation);
-            var data = S.run(function () {
-                patcher.update(source.get());
-                return patcher._mapped;
-            });
-            return new Enumerable(data, this._mutation);
+            return new Enumerable(mount(new MapPatcher(fn, this._mutation), this._source), this._mutation);
         };
         return Enumerable;
     }());
     var Patcher = (function () {
-        function Patcher(mutation) {
-            var _this = this;
+        function Patcher(fn, mutation) {
             this._current = [];
             this._updates = null;
             this._mutation = mutation;
-            S.cleanup(function () { _this.onCleanup(); });
+            this._factory = fn;
+            this._indexed = fn.length > 1;
+            this._disposers = [];
+            this._tempDisposers = null;
+            this._indices = [];
+            this._tempIndices = null;
         }
-        Patcher.prototype.update = function (u) {
-            var ln = u.length;
-            this._updates = u;
-            this.onSetup(ln);
-            var m = this._mutation ? this._mutation() : null;
-            if (m !== null) {
-                this.onMutation(m);
-            }
-            else {
-                var c = this._current;
-                var cStart = 0;
-                var uStart = 0;
-                var cEnd = c.length - 1;
-                var uEnd = ln - 1;
-                if (cEnd < 0) {
-                    if (uEnd > 0) {
-                        while (uStart <= uEnd) {
-                            this.onEnter(uStart++);
-                        }
-                    }
-                }
-                else if (uStart < 0) {
-                    if (cEnd > 0) {
-                        while (cStart <= cEnd) {
-                            this.onExit(cStart++);
-                        }
-                    }
-                }
-                else {
-                    var loop = true;
-                    while (loop) {
-                        loop = false;
-                        for (; cEnd >= cStart && uEnd >= uStart && c[cStart] === u[uStart]; this.onMove(cStart++, uStart++, 0)) { }
-                        for (; cEnd >= cStart && uEnd >= uStart && c[cEnd] === u[uEnd]; this.onMove(cEnd--, uEnd--, 1)) { }
-                        for (; cEnd >= cStart && uEnd >= uStart && c[cEnd] === u[uStart]; this.onMove(cEnd--, uStart++, 2)) {
-                            loop = true;
-                        }
-                        for (; cEnd >= cStart && uEnd >= uStart && c[cStart] === u[uEnd]; this.onMove(cStart++, uEnd--, 3)) {
-                            loop = true;
-                        }
-                    }
-                    if (uStart > uEnd) {
-                        while (cStart <= cEnd) {
-                            this.onExit(cStart++);
-                        }
-                    }
-                    else if (cStart > cEnd) {
-                        while (uStart <= uEnd) {
-                            this.onEnter(uStart++);
-                        }
-                    }
-                    else {
-                        this.onUnresolved(cStart, cEnd, uStart, uEnd);
-                    }
-                }
-            }
-            this.onTeardown();
-            this._updates = null;
-        };
-        Patcher.prototype.onCleanup = function () { };
-        Patcher.prototype.onSetup = function (ln) { };
-        Patcher.prototype.onMutation = function (changes) { };
-        Patcher.prototype.onEnter = function (index) { };
-        Patcher.prototype.onMove = function (from, to, type) { };
-        Patcher.prototype.onExit = function (index) { };
-        Patcher.prototype.onUnresolved = function (cStart, cEnd, uStart, uEnd) { };
-        Patcher.prototype.onTeardown = function () { };
-        return Patcher;
-    }());
-    var ListPatcher = (function (_super) {
-        __extends$1(ListPatcher, _super);
-        function ListPatcher(source, fn, mutation) {
-            var _this = _super.call(this, mutation) || this;
-            _this._source = source;
-            _this._factory = fn;
-            _this._indexed = fn.length > 1;
-            _this._disposers = [];
-            _this._tempDisposers = null;
-            _this._indices = [];
-            _this._tempIndices = null;
-            return _this;
-        }
-        ListPatcher.prototype.onCleanup = function () {
-            for (var i = 0, ln = this._disposers.length; i < ln; i++) {
-                this.onExit(i);
-            }
-        };
-        ListPatcher.prototype.enter = function (item, index, i) {
-            return this._indexed ? (this._factory)(item, (i)) : (this._factory)(item);
-        };
-        ListPatcher.prototype.onSetup = function (ln) {
+        Patcher.prototype.onSetup = function (ln) {
             this._tempDisposers = new Array(ln);
             if (this._indexed) {
                 this._tempIndices = new Array(ln);
             }
         };
-        ListPatcher.prototype.onEnter = function (index) {
-            var _this = this;
-            this._tempDisposers[index] = S.root(function (dispose) {
-                var item = _this._updates[index];
-                if (_this._indexed) {
-                    var i_1 = _this._tempIndices[index] = { data: null, index: index };
-                    var node = i_1.data = S.track(function () {
-                        S.escape(function () { _this._source.get(); });
-                        return i_1.index;
-                    });
-                    _this.enter(item, index, node);
-                }
-                else {
-                    _this.enter(item, index);
-                }
-                return dispose;
-            });
+        Patcher.prototype.onMutation = function (m) {
         };
-        ListPatcher.prototype.onMove = function (from, to) {
+        Patcher.prototype.onEnter = function (index) {
+            return enter(this, index);
+        };
+        Patcher.prototype.onMove = function (from, to) {
             this._tempDisposers[to] = this._disposers[from];
             if (this._indexed) {
                 (this._tempIndices[to] = this._indices[from]).index = to;
             }
         };
-        ListPatcher.prototype.onExit = function (index) {
+        Patcher.prototype.onExit = function (index) {
             this._disposers[index]();
         };
-        ListPatcher.prototype.onUnresolved = function (cStart, cEnd, uStart, uEnd) {
-            var c = this._current;
-            var u = this._updates;
-            var preserved = {};
-            var map = new Map();
-            for (var i = cEnd; i >= cStart; i--) {
-                var cItem = c[i];
-                var ex = map.get(cItem);
-                if (ex != null) {
-                    if (typeof ex === 'number') {
-                        map.set(cItem, [ex, i]);
-                    }
-                    else {
-                        ex.push(i);
-                    }
-                }
-                else {
-                    map.set(cItem, i);
-                }
-            }
-            for (; uStart <= uEnd; uStart++) {
-                var cItem = u[uStart];
-                var ex = map.get(cItem);
-                if (ex != null) {
-                    var index = void 0;
-                    var del = false;
-                    if ((del = typeof ex === 'number')) {
-                        index = ex;
-                    }
-                    else {
-                        del = (index = ex.pop()) === undefined;
-                    }
-                    if (del) {
-                        map.delete(cItem);
-                    }
-                    if (index !== undefined) {
-                        preserved[index] = true;
-                        this.onMove(index, cStart);
-                        continue;
-                    }
-                }
-                this.onEnter(cStart);
-            }
-            for (; cStart <= cEnd; cStart++) {
-                if (!preserved[cStart]) {
-                    this.onExit(cStart);
-                }
-            }
+        Patcher.prototype.onUnresolved = function (cStart, cEnd, uStart, uEnd) {
+            resolve(this, cStart, cEnd, uStart, uEnd);
         };
-        ListPatcher.prototype.onTeardown = function () {
+        Patcher.prototype.onTeardown = function () {
             this._current = this._updates.slice();
             this._disposers = (this._tempDisposers);
             this._tempDisposers = null;
@@ -1081,23 +893,24 @@
                 this._indices = (this._tempIndices);
                 this._tempIndices = null;
             }
+            return null;
         };
-        return ListPatcher;
-    }(Patcher));
+        return Patcher;
+    }());
     var MapPatcher = (function (_super) {
         __extends$1(MapPatcher, _super);
-        function MapPatcher(source, fn, mutation) {
-            var _this = _super.call(this, source, fn, mutation) || this;
+        function MapPatcher(fn, mutation) {
+            var _this = _super.call(this, fn, mutation) || this;
             _this._mapped = [];
             _this._tempMapped = null;
             return _this;
         }
-        MapPatcher.prototype.enter = function (item, index, i) {
-            return this._tempMapped[index] = _super.prototype.enter.call(this, item, index, i);
-        };
         MapPatcher.prototype.onSetup = function (ln) {
             this._tempMapped = new Array(ln);
             _super.prototype.onSetup.call(this, ln);
+        };
+        MapPatcher.prototype.onEnter = function (index) {
+            return this._tempMapped[index] = _super.prototype.onEnter.call(this, index);
         };
         MapPatcher.prototype.onMove = function (from, to) {
             this._tempMapped[to] = this._mapped[from];
@@ -1105,10 +918,155 @@
         };
         MapPatcher.prototype.onTeardown = function () {
             this._mapped = (this._tempMapped);
+            this._tempMapped = null;
             _super.prototype.onTeardown.call(this);
+            return this._mapped;
         };
         return MapPatcher;
-    }(ListPatcher));
+    }(Patcher));
+    function enqueue(list, change) {
+        list._queue[list._count++] = change;
+        logWrite(list, null);
+    }
+    function reconcile(patcher, u) {
+        var ln = u.length;
+        patcher._updates = u;
+        patcher.onSetup(ln);
+        var m = patcher._mutation ? patcher._mutation() : null;
+        if (m !== null) {
+            patcher.onMutation(m);
+        }
+        else {
+            var c = patcher._current;
+            var cStart = 0;
+            var uStart = 0;
+            var cEnd = c.length - 1;
+            var uEnd = ln - 1;
+            if (cEnd < 0) {
+                if (uEnd > 0) {
+                    while (uStart <= uEnd) {
+                        patcher.onEnter(uStart++);
+                    }
+                }
+            }
+            else if (uStart < 0) {
+                if (cEnd > 0) {
+                    while (cStart <= cEnd) {
+                        patcher.onExit(cStart++);
+                    }
+                }
+            }
+            else {
+                var loop = true;
+                while (loop) {
+                    loop = false;
+                    for (; cEnd >= cStart && uEnd >= uStart && c[cStart] === u[uStart]; patcher.onMove(cStart++, uStart++, 1)) { }
+                    for (; cEnd >= cStart && uEnd >= uStart && c[cEnd] === u[uEnd]; patcher.onMove(cEnd--, uEnd--, 2)) { }
+                    for (; cEnd >= cStart && uEnd >= uStart && c[cEnd] === u[uStart]; patcher.onMove(cEnd--, uStart++, 3)) {
+                        loop = true;
+                    }
+                    for (; cEnd >= cStart && uEnd >= uStart && c[cStart] === u[uEnd]; patcher.onMove(cStart++, uEnd--, 4)) {
+                        loop = true;
+                    }
+                }
+                if (uStart > uEnd) {
+                    while (cStart <= cEnd) {
+                        patcher.onExit(cStart++);
+                    }
+                }
+                else if (cStart > cEnd) {
+                    while (uStart <= uEnd) {
+                        patcher.onEnter(uStart++);
+                    }
+                }
+                else {
+                    patcher.onUnresolved(cStart, cEnd, uStart, uEnd);
+                }
+            }
+        }
+        var result = patcher.onTeardown();
+        patcher._updates = null;
+        return result;
+    }
+    function mount(patcher, source) {
+        S.cleanup(function () { dismount(patcher); });
+        return S.on(source, function (result) {
+            return (reconcile(patcher, result));
+        });
+    }
+    function dismount(patcher) {
+        for (var i = 0, ln = patcher._current.length; i < ln; i++) {
+            patcher.onExit(i, true);
+        }
+    }
+    function enter(patcher, index) {
+        var result;
+        var owner = (Owner);
+        patcher._tempDisposers[index] = S.root(function (dispose) {
+            var item = patcher._updates[index];
+            var factory = patcher._factory;
+            if (patcher._indexed) {
+                var ti_1 = patcher._tempIndices[index] = { data: null, index: index };
+                var i = ti_1.data = S.track(function () { logDataRead(owner); return ti_1.index; });
+                result = (factory)(item, i);
+            }
+            else {
+                result = (factory)(item);
+            }
+            return dispose;
+        });
+        return result;
+    }
+    function resolve(patcher, cStart, cEnd, uStart, uEnd) {
+        var c = patcher._current;
+        var u = patcher._updates;
+        var i = 0;
+        var preserved = {};
+        var map = new Map();
+        for (i = cEnd; i >= cStart; i--) {
+            var cItem = c[i];
+            var ex = map.get(cItem);
+            if (ex != null) {
+                if (typeof ex == 'number') {
+                    map.set(cItem, [ex, i]);
+                }
+                else {
+                    ex.push(i);
+                }
+            }
+            else {
+                map.set(cItem, i);
+            }
+        }
+        for (i = uStart; i <= uEnd; i++) {
+            var uItem = u[i];
+            var ex = map.get(uItem);
+            if (ex != null) {
+                var index = void 0;
+                var del = false;
+                if ((del = typeof ex == 'number')) {
+                    index = ex;
+                }
+                else {
+                    del = (index = ex.pop()) == null;
+                }
+                if (del) {
+                    map.delete(uItem);
+                }
+                if (index != null) {
+                    preserved[index] = true;
+                    patcher.onMove(index, i);
+                    continue;
+                }
+            }
+            patcher.onEnter(cStart);
+        }
+        for (i = cStart; i <= cEnd; i++) {
+            if (!preserved[i]) {
+                patcher.onExit(i);
+            }
+        }
+    }
     function move(array, ln, from, to) {
         from = from < 0 ? ln + from : from;
         to = to < 0 ? ln + to : to;
@@ -1124,8 +1082,8 @@
     function removeAt(array, index, ln) {
         index = index < 0 ? ln + index : index;
         if (ln && index >= 0 && index < ln) {
-            for (var i = index; i < ln;) {
-                array[i++] = array[i];
+            while (index < ln) {
+                array[index++] = array[index];
             }
             array.length--;
         }
@@ -1156,14 +1114,16 @@
     exports.Data = Data;
     exports.Enumerable = Enumerable;
     exports.IComputation = IComputation;
+    exports.IEnumerable = IEnumerable;
+    exports.IPatcher = IPatcher;
     exports.List = List;
-    exports.ListPatcher = ListPatcher;
     exports.MapPatcher = MapPatcher;
-    exports.NOT_PENDING = NOT_PENDING;
-    exports.NoValue = NoValue;
     exports.Patcher = Patcher;
     exports.S = S;
     exports.Value = Value;
+    exports.dismount = dismount;
+    exports.mount = mount;
+    exports.reconcile = reconcile;
 
     Object.defineProperty(exports, '__esModule', { value: true });
 

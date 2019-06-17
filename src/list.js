@@ -1,18 +1,23 @@
 import {
-  NOT_PENDING,
+  IPatcher,
+  IEnumerable,
   IComputation,
-} from './shared';
+} from './records';
+
 import {
   S,
   Data,
   Owner,
+  logWrite,
   logDataRead,
   Computation,
+  NOT_PENDING,
 } from './data';
 
 /**
  * @template T 
  * @extends {Data<!Array<T>>}
+ * @implements {IEnumerable<T>}
  */
 class List extends Data {
 
@@ -33,7 +38,7 @@ class List extends Data {
     this._count = 0;
   }
 
-  /** @return {number} */
+  /** @type {number} */
   get length() {
     return this.get().length;
   }
@@ -41,10 +46,11 @@ class List extends Data {
   /**
    * @override
    * @param {!Array<T>} value 
+   * @return {!Array<T>}
    */
   set(value) {
     this._count = 0;
-    this.enqueue(/** @param {!Array<T>} array */(array) => {
+    enqueue(this, /** @param {!Array<T>} array */(array) => {
       /** @type {number} */
       const ln = value.length;
       for (let /** number */ i = 0; i < ln; i++) {
@@ -53,15 +59,6 @@ class List extends Data {
       array.length = ln;
     });
     return value;
-  }
-
-  /**
-   * @private
-   * @param {function(!Array<T>, number): void} change 
-   */
-  enqueue(change) {
-    this._queue[this._count++] = change;
-    super.set(null);
   }
 
   /** @override */
@@ -80,13 +77,13 @@ class List extends Data {
 
   /** @param {T} value */
   push(value) {
-    this.enqueue(/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
+    enqueue(this, /** @param {!Array<T>} array @param {number} ln */(array, ln) => {
       array[ln] = value;
     });
   }
 
   pop() {
-    this.enqueue(/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
+    enqueue(this, /** @param {!Array<T>} array @param {number} ln */(array, ln) => {
       if (ln) {
         array.length--;
       }
@@ -95,7 +92,7 @@ class List extends Data {
 
   /** @param {T} value */
   unshift(value) {
-    this.enqueue(/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
+    enqueue(this, /** @param {!Array<T>} array @param {number} ln */(array, ln) => {
       while (ln) {
         array[ln--] = array[ln];
       }
@@ -104,7 +101,7 @@ class List extends Data {
   }
 
   shift() {
-    this.enqueue(/** @param {!Array<T>} array */(array) => {
+    enqueue(this, /** @param {!Array<T>} array */(array) => {
       array.shift();
     });
   }
@@ -115,7 +112,7 @@ class List extends Data {
    * @param {T} value 
    */
   insert(index, value) {
-    this.enqueue(/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
+    enqueue(this,/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
       index = index < 0 ? index + ln : index;
       if (index >= 0 && index <= ln) {
         array.splice(index, 0, value);
@@ -129,7 +126,7 @@ class List extends Data {
    * @param {!Array<T>} values 
    */
   insertRange(index, values) {
-    this.enqueue(/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
+    enqueue(this, /** @param {!Array<T>} array @param {number} ln */(array, ln) => {
       insertRange(array, ln, index, values);
     });
   }
@@ -139,7 +136,7 @@ class List extends Data {
    * @param {T} value 
    */
   remove(value) {
-    this.enqueue(/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
+    enqueue(this, /** @param {!Array<T>} array @param {number} ln */(array, ln) => {
       for (let /** number */ i = 0; i < ln; i++) {
         if (array[i] === value) {
           return removeAt(array, i, ln);
@@ -153,7 +150,7 @@ class List extends Data {
    * @param {number} index 
    */
   removeAt(index) {
-    this.enqueue(/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
+    enqueue(this, /** @param {!Array<T>} array @param {number} ln */(array, ln) => {
       removeAt(array, index, ln)
     });
   }
@@ -164,7 +161,7 @@ class List extends Data {
    * @param {number} count
    */
   removeRange(from, count) {
-    this.enqueue(/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
+    enqueue(this, /** @param {!Array<T>} array @param {number} ln */(array, ln) => {
       removeRange(array, ln, from, count);
     });
   }
@@ -175,7 +172,7 @@ class List extends Data {
    * @param {T} value 
    */
   replace(index, value) {
-    this.enqueue(/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
+    enqueue(this, /** @param {!Array<T>} array @param {number} ln */(array, ln) => {
       index = index < 0 ? ln + index : index;
       if (ln && index >= 0 && index < ln) {
         array[index] = value;
@@ -189,7 +186,7 @@ class List extends Data {
    * @param {number} to
    */
   move(from, to) {
-    this.enqueue(/** @param {!Array<T>} array @param {number} ln */(array, ln) => {
+    enqueue(this, /** @param {!Array<T>} array @param {number} ln */(array, ln) => {
       move(array, ln, from, to);
     });
   }
@@ -249,7 +246,7 @@ class Observable extends List {
 
 /**
  * @template T 
- * @implements {IComputation<!Array<T>>}
+ * @implements {IEnumerable<T>}
  */
 class Enumerable {
 
@@ -271,6 +268,11 @@ class Enumerable {
     this._mutation = mutation;
   }
 
+  /** @type {number} */
+  get length() {
+    return this.get().length;
+  }
+
   /** @return {!Array<T>} */
   get() {
     return this._source.get();
@@ -281,11 +283,7 @@ class Enumerable {
    * @param {(function(T): void)|(function(T, IComputation<number>): void)} fn 
    */
   forEach(fn) {
-    /** @type {!IComputation<!Array<T>>} */
-    const source = this._source;
-    /** @type {!ListPatcher<T,void>} */
-    const patcher = new ListPatcher(source, fn, this._mutation);
-    S.on(source, /** @param {!Array<T>} result */ (result) => { patcher.update(result); });
+    mount(new Patcher(fn, this._mutation), this._source);
   }
 
   /**
@@ -294,27 +292,20 @@ class Enumerable {
    * @return {Enumerable<U>}
    */
   map(fn) {
-    /** @type {!IComputation<!Array<T>>} */
-    const source = this._source;
-    /** @type {!MapPatcher<T,U>} */
-    const patcher = new MapPatcher(source, fn, this._mutation);
-    /** @type {!IComputation<!Array<U>>} */
-    const data = S.on(source, /** @param {!Array<T>} result @return {!Array<U>} */(result) => {
-      patcher.update(result);
-      return patcher._mapped;
-    });
-    return new Enumerable(data, this._mutation);
+    return new Enumerable(mount(new MapPatcher(fn, this._mutation), this._source), this._mutation);
   }
 }
 
-/** @template T */
+/**
+ * @template T, U
+ * @implements {IPatcher<T,U>}
+ */
 class Patcher {
-
   /**
-   * @protected
+   * @param {(function(T): U)|(function(T, !IComputation<number>): U)} fn
    * @param {function(): Array<number>=} mutation 
    */
-  constructor(mutation) {
+  constructor(fn, mutation) {
     /**
      * @protected
      * @type {!Array<T>} */
@@ -328,137 +319,12 @@ class Patcher {
      * @protected
      * @type {(function(): Array<number>)|undefined} */
     this._mutation = mutation;
-    S.cleanup(() => { this.onCleanup(); });
-  }
-
-  /**
-   * 
-   * @param {!Array<T>} u 
-   */
-  update(u) {
-    /** @type {number} */
-    const ln = u.length;
-    this._updates = u;
-    this.onSetup(ln);
-    /** @type {Array<number>} */
-    const m = this._mutation ? this._mutation() : null;
-    if (m !== null) {
-      this.onMutation(m);
-    } else {
-      /** @type {!Array<T>} */
-      const c = this._current;
-      /** @type {number} */
-      let cStart = 0;
-      /** @type {number} */
-      let uStart = 0;
-      /** @type {number} */
-      let cEnd = c.length - 1;
-      /** @type {number} */
-      let uEnd = ln - 1;
-      if (cEnd < 0) {
-        if (uEnd > 0) {
-          while (uStart <= uEnd) {
-            this.onEnter(uStart++);
-          }
-        }
-      } else if (uStart < 0) {
-        if (cEnd > 0) {
-          while (cStart <= cEnd) {
-            this.onExit(cStart++);
-          }
-        }
-      } else {
-        /** @type {boolean} */
-        let loop = true;
-        while (loop) {
-          loop = false;
-          for (; cEnd >= cStart && uEnd >= uStart && c[cStart] === u[uStart]; this.onMove(cStart++, uStart++, 0)) { }
-          for (; cEnd >= cStart && uEnd >= uStart && c[cEnd] === u[uEnd]; this.onMove(cEnd--, uEnd--, 1)) { }
-          for (; cEnd >= cStart && uEnd >= uStart && c[cEnd] === u[uStart]; this.onMove(cEnd--, uStart++, 2)) {
-            loop = true;
-          }
-          for (; cEnd >= cStart && uEnd >= uStart && c[cStart] === u[uEnd]; this.onMove(cStart++, uEnd--, 3)) {
-            loop = true;
-          }
-        }
-        if (uStart > uEnd) {
-          while (cStart <= cEnd) {
-            this.onExit(cStart++);
-          }
-        } else if (cStart > cEnd) {
-          while (uStart <= uEnd) {
-            this.onEnter(uStart++);
-          }
-        } else {
-          this.onUnresolved(cStart, cEnd, uStart, uEnd);
-        }
-      }
-    }
-    this.onTeardown();
-    this._updates = null;
-  }
-
-  onCleanup() { }
-
-  /**
-   * 
-   * @param {number} ln
-   */
-  onSetup(ln) { }
-
-  /** @param {!Array<number>} changes */
-  onMutation(changes) { }
-
-  /** @param {number} index */
-  onEnter(index) { }
-
-  /**
-   * 
-   * @param {number} from 
-   * @param {number} to 
-   * @param {number=} type 
-   */
-  onMove(from, to, type) { }
-
-  /** @param {number} index */
-  onExit(index) { }
-
-  /**
-   * 
-   * @param {number} cStart 
-   * @param {number} cEnd 
-   * @param {number} uStart 
-   * @param {number} uEnd 
-   */
-  onUnresolved(cStart, cEnd, uStart, uEnd) { }
-
-  onTeardown() { }
-}
-
-/**
- * @template T, U
- * @extends {Patcher<T>}
- */
-class ListPatcher extends Patcher {
-  /**
-   * @param {!IComputation<!Array<T>>} source
-   * @param {(function(T): U)|(function(T, !IComputation<number>): U)} fn
-   * @param {function(): Array<number>=} mutation 
-   */
-  constructor(source, fn, mutation) {
-    super(mutation);
-    /**
-     * @const 
-     * @protected 
-     * @type {!IComputation<!Array<T>>} */
-    this._source = source;
     /**
      * @const 
      * @protected 
      * @type {(function(T): U)|(function(T, !IComputation<number>): U)} */
     this._factory = fn;
     /**
-     * @const 
      * @protected
      * @type {boolean} */
     this._indexed = fn.length > 1;
@@ -480,22 +346,6 @@ class ListPatcher extends Patcher {
     this._tempIndices = null;
   }
 
-  onCleanup() {
-    for (let /** number */ i = 0, /** number */ ln = this._disposers.length; i < ln; i++) {
-      this.onExit(i);
-    }
-  }
-
-  /**
-   * @param {T} item
-   * @param {number} index
-   * @param {IComputation<number>=} i 
-   * @return {U}
-   */
-  enter(item, index, i) {
-    return this._indexed ? /** @type {function(T, !IComputation<number>): U} */(this._factory)(item, /** @type {!IComputation<number>} */(i)) : /** @type {function(T): U} */(this._factory)(item);
-  }
-
   /**
    * 
    * @param {number} ln
@@ -507,29 +357,18 @@ class ListPatcher extends Patcher {
     }
   }
 
+  /** @param {!Array<number>} m */
+  onMutation(m) {
+
+  }
+
   /**
    * 
    * @param {number} index 
+   * @return {U}
    */
   onEnter(index) {
-    /** @type {Computation} */
-    const owner = Owner;
-    this._tempDisposers[index] = S.root((dispose) => {
-      /** @type {T} */
-      const item = this._updates[index];
-      if (this._indexed) {
-        /** @type {{data: IComputation<number>, index: number}} */
-        const i = this._tempIndices[index] = { data: null, index };
-        i.data = S.track(() => {
-          logDataRead(/** @type {!Computation} */(owner));
-          return i.index;
-        });
-        this.enter(item, index, i.data);
-      } else {
-        this.enter(item, index);
-      }
-      return dispose;
-    });
+    return enter(this, index);
   }
 
   /**
@@ -546,76 +385,24 @@ class ListPatcher extends Patcher {
 
   /**
    * 
-   * @param {number} index 
+   * @param {number} index
    */
   onExit(index) {
     this._disposers[index]();
   }
 
   /**
-  * 
-  * @param {number} cStart 
-  * @param {number} cEnd 
-  * @param {number} uStart 
-  * @param {number} uEnd 
-  */
+   * 
+   * @param {number} cStart 
+   * @param {number} cEnd 
+   * @param {number} uStart 
+   * @param {number} uEnd 
+   */
   onUnresolved(cStart, cEnd, uStart, uEnd) {
-    /** @type {!Array<T>} */
-    const c = this._current;
-    /** @type {Array<T>} */
-    const u = this._updates;
-    /** @type {!Object<number, boolean>} */
-    const preserved = {};
-    /** @type {!Map<T, (number|!Array<number>)>} */
-    const map = new Map();
-    for (let /** number */ i = cEnd; i >= cStart; i--) {
-      /** @type {T} */
-      const cItem = c[i];
-      /** @type {number|!Array<number>|undefined} */
-      const ex = map.get(cItem);
-      if (ex != null) {
-        if (typeof ex === 'number') {
-          map.set(cItem, [ex, i]);
-        } else {
-          ex.push(i);
-        }
-      } else {
-        map.set(cItem, i);
-      }
-    }
-    for (; uStart <= uEnd; uStart++) {
-      /** @type {T} */
-      const cItem = u[uStart];
-      /** @type {number|Array<number>|undefined} */
-      const ex = map.get(cItem);
-      if (ex != null) {
-        /** @type {number|undefined} */
-        let index;
-        /** @type {boolean} */
-        let del = false;
-        if ((del = typeof ex === 'number')) {
-          index = ex;
-        } else {
-          del = (index = ex.pop()) === undefined;
-        }
-        if (del) {
-          map.delete(cItem);
-        }
-        if (index !== undefined) {
-          preserved[index] = true;
-          this.onMove(index, cStart);
-          continue;
-        }
-      }
-      this.onEnter(cStart);
-    }
-    for (; cStart <= cEnd; cStart++) {
-      if (!preserved[cStart]) {
-        this.onExit(cStart);
-      }
-    }
+    resolve(this, cStart, cEnd, uStart, uEnd);
   }
 
+  /** @return {Array<U>} */
   onTeardown() {
     this._current = this._updates.slice();
     this._disposers = /** @type {!Array<function(boolean=): void>} */(this._tempDisposers);
@@ -624,24 +411,24 @@ class ListPatcher extends Patcher {
       this._indices = /** @type {!Array<{data: IComputation<number>, index: number}>} */(this._tempIndices);
       this._tempIndices = null;
     }
+    return null;
   }
 }
 
 /**
  * @template T, U 
- * @extends {ListPatcher<T,U>}
+ * @extends {Patcher<T,U>}
  */
-class MapPatcher extends ListPatcher {
+class MapPatcher extends Patcher {
 
 
   /**
    * 
-   * @param {!IComputation<!Array<T>>} source 
    * @param {(function(T): U)|(function(T, !IComputation<number>): U)} fn
    * @param {function(): Array<number>=} mutation 
    */
-  constructor(source, fn, mutation) {
-    super(source, fn, mutation);
+  constructor(fn, mutation) {
+    super(fn, mutation);
     /**
      * @protected 
      * @type {!Array<U>} */
@@ -654,17 +441,6 @@ class MapPatcher extends ListPatcher {
 
   /**
    * @override
-   * @param {T} item 
-   * @param {number} index
-   * @param {IComputation<number>=} i
-   * @return {U} 
-   */
-  enter(item, index, i) {
-    return this._tempMapped[index] = super.enter(item, index, i);
-  }
-
-  /**
-   * @override
    * @param {number} ln 
    */
   onSetup(ln) {
@@ -673,18 +449,230 @@ class MapPatcher extends ListPatcher {
   }
 
   /**
+   * @override
+   * @param {number} index
+   * @return {U} 
+   */
+  onEnter(index) {
+    return this._tempMapped[index] = super.onEnter(index);
+  }
+
+  /**
    * 
    * @param {number} from 
-   * @param {number} to 
+   * @param {number} to
    */
   onMove(from, to) {
     this._tempMapped[to] = this._mapped[from];
     super.onMove(from, to);
   }
 
+  /** @return {Array<U>} */
   onTeardown() {
     this._mapped = /** @type {!Array<U>} */(this._tempMapped);
+    this._tempMapped = null;
     super.onTeardown();
+    return this._mapped;
+  }
+}
+
+/**
+ * @template T
+ * @param {!List<T>} list 
+ * @param {function(!Array<T>, number): void} change 
+ */
+function enqueue(list, change) {
+  list._queue[list._count++] = change;
+  logWrite(list, null);
+}
+
+/**
+ * @template T,U
+ * @param {IPatcher<T,U>} patcher
+ * @param {!Array<T>} u
+ * @return {Array<U>} 
+ */
+function reconcile(patcher, u) {
+  /** @type {number} */
+  const ln = u.length;
+  patcher._updates = u;
+  patcher.onSetup(ln);
+  /** @type {Array<number>} */
+  const m = patcher._mutation ? patcher._mutation() : null;
+  if (m !== null) {
+    patcher.onMutation(m);
+  } else {
+    /** @type {!Array<T>} */
+    const c = patcher._current;
+    /** @type {number} */
+    let cStart = 0;
+    /** @type {number} */
+    let uStart = 0;
+    /** @type {number} */
+    let cEnd = c.length - 1;
+    /** @type {number} */
+    let uEnd = ln - 1;
+    if (cEnd < 0) {
+      if (uEnd > 0) {
+        while (uStart <= uEnd) {
+          patcher.onEnter(uStart++);
+        }
+      }
+    } else if (uStart < 0) {
+      if (cEnd > 0) {
+        while (cStart <= cEnd) {
+          patcher.onExit(cStart++);
+        }
+      }
+    } else {
+      /** @type {boolean} */
+      let loop = true;
+      while (loop) {
+        loop = false;
+        for (; cEnd >= cStart && uEnd >= uStart && c[cStart] === u[uStart]; patcher.onMove(cStart++, uStart++, 1)) { }
+        for (; cEnd >= cStart && uEnd >= uStart && c[cEnd] === u[uEnd]; patcher.onMove(cEnd--, uEnd--, 2)) { }
+        for (; cEnd >= cStart && uEnd >= uStart && c[cEnd] === u[uStart]; patcher.onMove(cEnd--, uStart++, 3)) {
+          loop = true;
+        }
+        for (; cEnd >= cStart && uEnd >= uStart && c[cStart] === u[uEnd]; patcher.onMove(cStart++, uEnd--, 4)) {
+          loop = true;
+        }
+      }
+      if (uStart > uEnd) {
+        while (cStart <= cEnd) {
+          patcher.onExit(cStart++);
+        }
+      } else if (cStart > cEnd) {
+        while (uStart <= uEnd) {
+          patcher.onEnter(uStart++);
+        }
+      } else {
+        patcher.onUnresolved(cStart, cEnd, uStart, uEnd);
+      }
+    }
+  }
+  /** @type {Array<U>} */
+  const result = patcher.onTeardown();
+  patcher._updates = null;
+  return result;
+}
+
+/**
+ * @template T,U
+ * @param {!IPatcher<T,U>} patcher 
+ * @param {!IComputation<!Array<T>>} source
+ * @return {!IComputation<!Array<U>>}
+ */
+function mount(patcher, source) {
+  S.cleanup(() => { dismount(patcher); });
+  return S.on(source, /** @param {!Array<T>} result @return {!Array<U>} */ (result) => {
+    return /** @type {!Array<U>} */(reconcile(patcher, result));;
+  });
+}
+
+/**
+ * @template T,U
+ * @param {IPatcher<T,U>} patcher 
+ */
+function dismount(patcher) {
+  for (let /** number */ i = 0, /** number */ ln = patcher._current.length; i < ln; i++) {
+    patcher.onExit(i, true);
+  }
+}
+
+/**
+ * @template T,U
+ * @param {Patcher<T,U>} patcher 
+ * @param {number} index 
+ * @return {U}
+ */
+function enter(patcher, index) {
+  /** @type {U} */
+  let result;
+  const owner = /** @type {!Computation} */(Owner);
+  patcher._tempDisposers[index] = S.root((dispose) => {
+    /** @type {T} */
+    const item = patcher._updates[index];
+    /** @type {(function(T): U)|(function(T, !IComputation<number>): U)} */
+    const factory = patcher._factory;
+    if (patcher._indexed) {
+      /** @type {{data: IComputation<number>, index: number}} */
+      const ti = patcher._tempIndices[index] = { data: null, index };
+      /** @type {!IComputation<number>} */
+      const i = ti.data = S.track(() => { logDataRead(owner); return ti.index; });
+      result = /** @type {function(T, !IComputation<number>): U} */(factory)(item, i);
+    } else {
+      result = /** @type {function(T): U} */(factory)(item);
+    }
+    return dispose;
+  });
+  return result;
+}
+
+/**
+ * @template T,U
+ * @param {IPatcher<T,U>} patcher 
+ * @param {number} cStart 
+ * @param {number} cEnd 
+ * @param {number} uStart 
+ * @param {number} uEnd 
+ */
+function resolve(patcher, cStart, cEnd, uStart, uEnd) {
+  /** @type {!Array<T>} */
+  const c = patcher._current;
+  /** @type {Array<T>} */
+  const u = patcher._updates;
+  /** @type {number} */
+  let i = 0;
+  /** @type {!Object<number, boolean>} */
+  const preserved = {};
+  /** @type {!Map<T, (number|!Array<number>)>} */
+  const map = new Map();
+  for (i = cEnd; i >= cStart; i--) {
+    /** @type {T} */
+    const cItem = c[i];
+    /** @type {number|!Array<number>|undefined} */
+    const ex = map.get(cItem);
+    if (ex != null) {
+      if (typeof ex == 'number') {
+        map.set(cItem, [ex, i]);
+      } else {
+        ex.push(i);
+      }
+    } else {
+      map.set(cItem, i);
+    }
+  }
+  for (i = uStart; i <= uEnd; i++) {
+    /** @type {T} */
+    const uItem = u[i];
+    /** @type {number|Array<number>|undefined} */
+    const ex = map.get(uItem);
+    if (ex != null) {
+      /** @type {number|undefined} */
+      let index;
+      /** @type {boolean} */
+      let del = false;
+      if ((del = typeof ex == 'number')) {
+        index = ex;
+      } else {
+        del = (index = ex.pop()) == null;
+      }
+      if (del) {
+        map.delete(uItem);
+      }
+      if (index != null) {
+        preserved[index] = true;
+        patcher.onMove(index, i);
+        continue;
+      }
+    }
+    patcher.onEnter(cStart);
+  }
+  for (i = cStart; i <= cEnd; i++) {
+    if (!preserved[i]) {
+      patcher.onExit(i);
+    }
   }
 }
 
@@ -719,8 +707,8 @@ function move(array, ln, from, to) {
 function removeAt(array, index, ln) {
   index = index < 0 ? ln + index : index;
   if (ln && index >= 0 && index < ln) {
-    for (let /** number */i = index; i < ln;) {
-      array[i++] = array[i];
+    while (index < ln) {
+      array[index++] = array[index];
     }
     array.length--;
   }
@@ -770,6 +758,8 @@ export {
   List,
   Enumerable,
   Patcher,
-  ListPatcher,
   MapPatcher,
+  mount,
+  dismount,
+  reconcile,
 }

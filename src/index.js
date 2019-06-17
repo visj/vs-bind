@@ -1,6 +1,8 @@
 export {
+  IPatcher,
   IComputation,
-} from './shared';
+  IEnumerable,
+} from './records';
 
 export {
   S,
@@ -12,6 +14,8 @@ export {
   List,
   Enumerable,
   Patcher,
-  ListPatcher,
   MapPatcher,
+  mount,
+  dismount,
+  reconcile,
 } from './list';

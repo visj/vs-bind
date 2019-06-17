@@ -1,8 +1,7 @@
 import {
   NoValue,
-  NOT_PENDING,
   IComputation,
-} from './shared';
+} from './records';
 
 const S = {};
 
@@ -10,33 +9,13 @@ const S = {};
  * @template T 
  * @implements {IComputation<T>}
  */
-class Signal {
-
-  /**
-   * 
-   * @param {T} value 
-   */
-  constructor(value) {
-    /**
-     * @protected 
-     * @type {T} */
-    this._value = value;
-  }
-
-  /** @return {T} */
-  get() {
-    return this._value;
-  }
-}
-
-/**
- * @template T 
- * @extends {Signal<T>}
- */
-class Computation extends Signal {
+class Computation {
 
   constructor() {
-    super(void 0);
+    /**
+     * @private 
+     * @type {T} */
+    this._value = null;
     /** 
      * @private 
      * @type {(function(T=): T)|null} */
@@ -53,6 +32,10 @@ class Computation extends Signal {
      * @private 
      * @type {boolean} */
     this._onchange = false;
+    /**
+     * @private 
+     * @type {(function(T, T): boolean)|null} */
+    this._comparer = null;
     /** 
      * @private 
      * @type {Log} */
@@ -95,12 +78,9 @@ class Computation extends Signal {
     this._cleanups = null;
   }
 
-  /**
-   * @override 
-   * @return {T} 
-   */
-  get() {
-    if (Listener !== null) {
+  /** @param {boolean=} sample @return {T} */
+  get(sample) {
+    if (!sample && Listener != null) {
       logComputationRead(this);
     }
     return this._value;
@@ -109,16 +89,19 @@ class Computation extends Signal {
 
 /**
  * @template T
- * @extends {Signal<T>}
+ * @implements {IComputation<T>}
  */
-class Data extends Signal {
+class Data {
 
   /**
    * 
    * @param {T} value 
    */
   constructor(value) {
-    super(value);
+    /**
+     * @protected 
+     * @type {T} */
+    this._value = value;
     /** 
      * @private 
      * @type {Log} */
@@ -130,12 +113,12 @@ class Data extends Signal {
   }
 
   /**
-   * @final 
-   * @override
+   * @final
+   * @param {boolean=} sample 
    * @return {T} 
    */
-  get() {
-    if (Listener !== null) {
+  get(sample) {
+    if (!sample && Listener !== null) {
       logDataRead(this);
     }
     return this._value;
@@ -268,7 +251,8 @@ class Queue {
   }
 }
 
-
+/** @type {!NoValue} */
+const NOT_PENDING = /** @type {!NoValue} */({});
 /** @type {!Computation} */
 const NOT_OWNED = new Computation();
 /** @type {!Clock} */
@@ -281,8 +265,6 @@ let Owner = null;
 let Listener = null;
 /** @type {number} */
 let Slot = 0;
-/** @type {boolean} */
-let Escaped = false;
 /** @type {Computation} */
 let Recycled = null;
 
@@ -309,6 +291,9 @@ S.run = function (fn, seed) {
 S.track = function (fn, seed, comparer) {
   const node = /** @type {!Computation<T>} */(getCandidateNode());
   node._onchange = true;
+  if (comparer !== void 0) {
+    node._comparer = comparer;
+  }
   return makeComputationNode(fn, seed, node);
 }
 
@@ -352,58 +337,60 @@ S.root = function (fn) {
 };
 
 /**
- * @const
  * @template T
- * @param {!IComputation|!Array<IComputation>|function(): void} ev
- * @param {(function(): T)|(function(T): T)} fn
- * @param {boolean=} onchanges 
- * @return {function(T=): T}
+ * @param {!Array<!IComputation<T>>} array
+ * @return {!IComputation<!Array<T>>}
  */
-S.bind = function (ev, fn, onchanges) {
+S.join = function (array) {
   /** @type {number} */
-  const type = typeof ev === 'function' ? 0 : Array.isArray(ev) ? 1 : 2;
-  return /** @param {T=} value @return {T} */ function (value) {
-    if (type === 0) {
-      /** @type {function(): void} */(ev)();
-    } else if (type === 1) {
-      for (let /** number */ i = 0, /** number */ ln = /** @type {!Array<IComputation>} */(ev).length; i < ln; i++) {
-        /** @type {!Array<IComputation>} */(ev)[i].get();
+  const ln = array.length;
+  /** @type {!Array<T>} */
+  const out = [];
+  return {
+    get: /** @param {boolean=} sample @return {!Array<T>} */ (sample) => {
+      for (let /** number */ i = 0; i < ln; i++) {
+        out[i] = array[i].get(sample);
       }
-    } else {
-      /** @type {!IComputation} */(ev).get();
+      return out;
     }
-    if (onchanges) {
-      onchanges = false;
-    } else {
-      value = S.sample(() => fn(value));
-    }
-    return value;
-  }
+  };
 }
 
 /**
  * @const
  * @template T,U
- * @param {!IComputation<U>|function(): U} ev
+ * @param {!IComputation<U>} ev
  * @param {(function(U): T)|(function(U, T): T)} fn
  * @param {T=} seed 
- * @param {boolean=} onchanges 
+ * @param {boolean=} track
+ * @param {boolean=} onchanges  
+ * @param {function(T, T): boolean=} comparer
  * @return {!IComputation<T>}
  */
-S.on = function (ev, fn, seed, onchanges) {
-  /** @type {boolean} */
-  const isfn = typeof ev === 'function';
+S.on = function (ev, fn, seed, track, onchanges, comparer) {
 
-  return S.run(/** @param {T=} seed @return {T} */ (seed) => {
+  /**
+   * @param {T=} seed
+   * @return {T} 
+   */
+  const on = seed => {
     /** @type {U} */
-    const result = isfn ? /** @type {function(): U} */(ev)() : /** @type {!IComputation<U>} */(ev).get();
+    const result = ev.get();
     if (onchanges) {
       onchanges = false;
     } else {
-      seed = S.sample(() => fn(result, seed));
+      /** @type {Computation} */
+      const listener = Listener;
+      try {
+        Listener = null;
+        seed = fn(result, seed);
+      } finally {
+        Listener = listener;
+      }
     }
     return seed;
-  }, seed);
+  };
+  return track ? S.track(on, seed, comparer) : S.run(on, seed);
 };
 
 /**
@@ -435,7 +422,7 @@ S.freeze = function (fn) {
 /**
  * @const
  * @template T
- * @param {!IComputation<T>|function(): T} fn
+ * @param {function(): T} fn
  * @return {T}
  */
 S.sample = function (fn) {
@@ -443,7 +430,7 @@ S.sample = function (fn) {
   const listener = Listener;
   try {
     Listener = null;
-    return typeof fn === 'function' ? fn() : fn.get();
+    return fn();
   } finally {
     Listener = listener;
   }
@@ -479,21 +466,6 @@ S.dispose = function (node) {
   }
 };
 
-/**
- * @template T
- * @param {function(): T} fn
- */
-S.escape = function (fn) {
-  /** @type {boolean} */
-  const escaped = Escaped;
-  try {
-    Escaped = true;
-    return fn();
-  } finally {
-    Escaped = escaped;
-  }
-}
-
 /** 
  * @const
  * @return {boolean} 
@@ -525,7 +497,7 @@ function makeComputationNode(fn, value, node) {
   /** @type {boolean} */
   const toplevel = RunningClock === null;
   Owner = Listener = node;
-  value = toplevel ? execToplevelComputation(fn, value) : fn(value);
+  value = toplevel ? execToplevelComputation(/** @type {function(T): T} */(fn), value) : fn(value);
   Owner = owner;
   Listener = listener;
   /** @type {boolean} */
@@ -533,12 +505,12 @@ function makeComputationNode(fn, value, node) {
   if (toplevel) {
     finishToplevelComputation(owner, listener);
   }
-  return recycled ? new Signal(value) : node;
+  return recycled ? { get: () => value } : node;
 }
 
 /**
  * @template T
- * @param {function(T=): T} fn 
+ * @param {function(T): T} fn 
  * @param {T} value 
  * @return {T}
  */
@@ -666,12 +638,12 @@ function logDataRead(data) {
  */
 function logComputationRead(node) {
   if ((node._state & 6) !== 0) {
-    /** @type {!Array<Computation>} */
-    const queue = RootClock._updates._items;
-    applyUpstreamUpdates(node, queue);
+    /** @type {Queue<!Computation>} */
+    const queue = RootClock._updates;
+    applyUpstreamUpdates(node, queue._items);
   }
   if (node._age === RootClock._time) {
-    if (node._state === 8 && !Escaped) {
+    if (node._state === 8) {
       throw new Error("Circular dependency.");
     }
     applyComputationUpdate(node);
@@ -746,7 +718,7 @@ function event() {
   const owner = Owner;
   RootClock._updates.reset();
   try {
-    run(RootClock);
+    run(RootClock)
   }
   finally {
     Owner = owner;
@@ -809,7 +781,7 @@ function applyComputationUpdate(node) {
     if (node._onchange) {
       /** @type {T} */
       const current = updateComputation(node);
-      if (node._value !== current) {
+      if (node._comparer != null ? node._comparer(current, node._value) : node._value !== current) {
         markDownstreamComputations(node, false, true);
       }
     } else {
@@ -1089,11 +1061,20 @@ function disposeComputation(node) {
   cleanup(node, true);
 }
 
+S.root(() => {
+  let d = new Data(5);
+  let c = S.track(() => {
+    return d.get();
+  }, 3, (x, y) => x > y);
+})
+
 export {
   S,
   Data,
   Value,
   Owner,
+  logWrite,
   logDataRead,
   Computation,
+  NOT_PENDING,
 }
