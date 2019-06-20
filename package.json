@@ -16,9 +16,6 @@
   "author": "VSjolund",
   "license": "MIT",
   "browsersList": "> 0.25%",
-  "dependencies": {
-    "vs-typeof": "../vs-typeof"
-  },
   "devDependencies": {
     "@types/jasmine": "^3.3.9",
     "jasmine": "^3.3.1",

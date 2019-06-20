@@ -80,8 +80,8 @@ class Computation {
 
   /** @param {boolean=} sample @return {T} */
   get(sample) {
-    if (!sample && Listener != null) {
-      logComputationRead(this);
+    if (Listener !== null) {
+      logComputationRead(this, sample);
     }
     return this._value;
   }
@@ -289,7 +289,7 @@ S.run = function (fn, seed) {
  * @return {!IComputation<T>} 
  */
 S.track = function (fn, seed, comparer) {
-  const node = /** @type {!Computation<T>} */(getCandidateNode());
+  const node = getCandidateNode();
   node._onchange = true;
   if (comparer !== void 0) {
     node._comparer = comparer;
@@ -347,7 +347,7 @@ S.join = function (array) {
   /** @type {!Array<T>} */
   const out = [];
   return {
-    get: /** @param {boolean=} sample @return {!Array<T>} */ (sample) => {
+    get: /** @param {boolean=} sample @return {!Array<T>} */ sample => {
       for (let /** number */ i = 0; i < ln; i++) {
         out[i] = array[i].get(sample);
       }
@@ -635,20 +635,23 @@ function logDataRead(data) {
 /**
  * 
  * @param {!Computation} node 
+ * @param {boolean=} sample
  */
-function logComputationRead(node) {
+function logComputationRead(node, sample) {
   if ((node._state & 6) !== 0) {
-    /** @type {Queue<!Computation>} */
+    /** @type {!Queue<!Computation>} */
     const queue = RootClock._updates;
     applyUpstreamUpdates(node, queue._items);
   }
   if (node._age === RootClock._time) {
-    if (node._state === 8) {
+    if (node._state === 8 && !sample) {
       throw new Error("Circular dependency.");
     }
     applyComputationUpdate(node);
   }
-  logDataRead(node);
+  if (!sample) {
+    logDataRead(node);
+  }
 }
 
 /**
@@ -1060,13 +1063,6 @@ function disposeComputation(node) {
   node._log = null;
   cleanup(node, true);
 }
-
-S.root(() => {
-  let d = new Data(5);
-  let c = S.track(() => {
-    return d.get();
-  }, 3, (x, y) => x > y);
-})
 
 export {
   S,

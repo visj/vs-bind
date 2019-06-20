@@ -161,8 +161,8 @@ class Computation {
 
   /** @param {boolean=} sample @return {T} */
   get(sample) {
-    if (!sample && Listener != null) {
-      logComputationRead(this);
+    if (Listener !== null) {
+      logComputationRead(this, sample);
     }
     return this._value;
   }
@@ -370,9 +370,9 @@ S.run = function (fn, seed) {
  * @return {!IComputation<T>} 
  */
 S.track = function (fn, seed, comparer) {
-  const node = /** @type {!Computation<T>} */(getCandidateNode());
+  const node = getCandidateNode();
   node._onchange = true;
-  if (comparer !== undefined) {
+  if (comparer !== void 0) {
     node._comparer = comparer;
   }
   return makeComputationNode(fn, seed, node);
@@ -428,7 +428,7 @@ S.join = function (array) {
   /** @type {!Array<T>} */
   const out = [];
   return {
-    get: /** @param {boolean=} sample @return {!Array<T>} */ (sample) => {
+    get: /** @param {boolean=} sample @return {!Array<T>} */ sample => {
       for (let /** number */ i = 0; i < ln; i++) {
         out[i] = array[i].get(sample);
       }
@@ -578,7 +578,7 @@ function makeComputationNode(fn, value, node) {
   /** @type {boolean} */
   const toplevel = RunningClock === null;
   Owner = Listener = node;
-  value = toplevel ? execToplevelComputation(fn, value) : fn(value);
+  value = toplevel ? execToplevelComputation(/** @type {function(T): T} */(fn), value) : fn(value);
   Owner = owner;
   Listener = listener;
   /** @type {boolean} */
@@ -591,7 +591,7 @@ function makeComputationNode(fn, value, node) {
 
 /**
  * @template T
- * @param {function(T=): T} fn 
+ * @param {function(T): T} fn 
  * @param {T} value 
  * @return {T}
  */
@@ -716,20 +716,23 @@ function logDataRead(data) {
 /**
  * 
  * @param {!Computation} node 
+ * @param {boolean=} sample
  */
-function logComputationRead(node) {
+function logComputationRead(node, sample) {
   if ((node._state & 6) !== 0) {
-    /** @type {Queue<!Computation>} */
+    /** @type {!Queue<!Computation>} */
     const queue = RootClock._updates;
     applyUpstreamUpdates(node, queue._items);
   }
   if (node._age === RootClock._time) {
-    if (node._state === 8) {
+    if (node._state === 8 && !sample) {
       throw new Error("Circular dependency.");
     }
     applyComputationUpdate(node);
   }
-  logDataRead(node);
+  if (!sample) {
+    logDataRead(node);
+  }
 }
 
 /**
