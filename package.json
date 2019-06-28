@@ -7,8 +7,8 @@
   "module": "dist/es/vs-bind.js",
   "types": "lib.d.ts",
   "scripts": {
-    "bench": "tsc && rollup -c && rm -r dist/bench",
-    "build": "node util/bundle.js",
+    "bench": "tsc && rollup -c rollup.bench.js && rm -r dist/bench",
+    "build": "rollup -c",
     "test": "jasmine",
     "dev": "npm run build && npm test"
   },

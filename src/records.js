@@ -1,12 +1,101 @@
+//@ts-nocheck
+
 /**
  * @record
  * @template T
  */
 class IComputation {
 
-  //@ts-ignore
-  /** @param {boolean=} sample @return {T} */
-  get(sample) { }
+  /** @return {T} */
+  get() { }
+}
+
+/** @record */
+class ISwitch {
+
+
+  /**
+   * @template T
+   * @param {(function(): T)|(function(T): T)} fn 
+   * @param {T=} seed
+   * @return {!IComputation<T>} 
+   */
+  run(fn, seed) { }
+
+  /**
+   * @template T
+   * @param {(function(): T)|(function(T): T)} fn 
+   * @param {T=} seed
+   * @param {function(T, T): boolean=} comparer
+   * @return {!IComputation<T>} 
+   */
+  track(fn, seed, comparer) { }
+
+
+  /**
+   * @template T
+   * @param {(function(): T)|(function(function(): void): T)} fn
+   * @return {T}
+   */
+  root(fn) { }
+
+  /**
+   * @template T
+   * @param {!Array<!IComputation<T>>} array
+   * @return {!IComputation<!Array<T>>}
+   */
+  join(array) { }
+
+  /**
+   * @template T,U
+   * @param {!IComputation<U>} ev
+   * @param {(function(U): T)|(function(U, T): T)} fn
+   * @param {T=} seed 
+   * @param {boolean=} track
+   * @param {boolean=} onchanges  
+   * @param {function(T, T): boolean=} comparer
+   * @return {!IComputation<T>}
+   */
+  on(ev, fn, seed, track, onchanges, comparer) { }
+
+
+  /**
+   * @template T
+   * @param {function(): T} fn
+   * @return {T}
+   */
+  freeze(fn) { }
+
+
+  /**
+   * @template T
+   * @param {(function(): T)|!IComputation<T>} fn
+   * @return {T}
+   */
+  sample(fn) { }
+
+  /**
+   * @param {function(boolean): void} fn 
+   * @return {void}
+   */
+  cleanup(fn) { }
+
+  /**
+   * @param {IComputation} node
+   * @return {void}
+   */
+  dispose(node) { }
+
+  /**
+  * @param {IComputation} node 
+  */
+  renew(node) { }
+
+  /** @return {boolean} */
+  frozen() { }
+
+  /** @return {boolean} */
+  listening() { }
 }
 
 /**
@@ -24,13 +113,21 @@ IEnumerable.prototype.length;
  * @template T,U
  */
 class IPatcher {
-  
+
+  constructor() {
+    /** @type {!Array<T>} */
+    this._current;
+    /** @type {Array<T>} */
+    this._updates;
+    /** @type {(function(): Array<number>)|undefined} */
+    this._mutation;
+  }
+
   /** @param {number} ln */
   onSetup(ln) { }
 
   /** 
    * @param {number} index
-   //@ts-ignore
    * @return {U} 
    */
   onEnter(index) { }
@@ -55,7 +152,6 @@ class IPatcher {
    */
   onUnresolved(cStart, cEnd, uStart, uEnd) { }
 
-  //@ts-ignore
   /** @return {Array<U>} */
   onTeardown() { }
 
@@ -63,26 +159,16 @@ class IPatcher {
   onMutation(mutation) { }
 }
 
-//@ts-ignore
-/** @type {!Array<T>} */
-IPatcher.prototype._current;
-
-//@ts-ignore
-/** @type {Array<T>} */
-IPatcher.prototype._updates;
-
-/** @type {(function(): Array<number>)|undefined} */
-IPatcher.prototype._mutation;
-
 /**
  * @final
  * @interface
  */
 class NoValue { }
 
-export { 
-  NoValue, 
+export {
+  NoValue,
   IComputation,
+  ISwitch,
   IEnumerable,
   IPatcher,
 }

@@ -1,9 +1,8 @@
 import {
   NoValue,
+  ISwitch,
   IComputation,
 } from './records';
-
-const S = {};
 
 /**
  * @template T 
@@ -78,10 +77,16 @@ class Computation {
     this._cleanups = null;
   }
 
-  /** @param {boolean=} sample @return {T} */
-  get(sample) {
+  /** @return {T} */
+  get() {
     if (Listener !== null) {
-      logComputationRead(this, sample);
+      if ((this._state & 7) !== 0) {
+        liftComputation(this);
+      }
+      if (this._age === RootClock._time && this._state === 8) {
+        throw new Error("Circular dependency.");
+      }
+      logDataRead(this);
     }
     return this._value;
   }
@@ -114,11 +119,10 @@ class Data {
 
   /**
    * @final
-   * @param {boolean=} sample 
    * @return {T} 
    */
-  get(sample) {
-    if (!sample && Listener !== null) {
+  get() {
+    if (Listener !== null) {
       logDataRead(this);
     }
     return this._value;
@@ -268,6 +272,10 @@ let Slot = 0;
 /** @type {Computation} */
 let Recycled = null;
 
+
+/** @implements {ISwitch} */
+const S = {};
+
 /**
  * @const
  * @template T
@@ -277,8 +285,7 @@ let Recycled = null;
  */
 S.run = function (fn, seed) {
   return makeComputationNode(fn, seed, getCandidateNode());
-};
-
+}
 
 /**
  * @const
@@ -337,19 +344,23 @@ S.root = function (fn) {
 };
 
 /**
+ * @const
  * @template T
- * @param {!Array<!IComputation<T>>} array
+ * @param {!Array<!IComputation<T>|(function(): T)>} array
  * @return {!IComputation<!Array<T>>}
  */
 S.join = function (array) {
-  /** @type {number} */
-  const ln = array.length;
-  /** @type {!Array<T>} */
-  const out = [];
   return {
-    get: /** @param {boolean=} sample @return {!Array<T>} */ sample => {
+    /** @return {!Array<T>} */
+    get() {
+      /** @type {number} */
+      const ln = array.length;
+      /** @type {!Array<T>} */
+      const out = new Array(ln);
       for (let /** number */ i = 0; i < ln; i++) {
-        out[i] = array[i].get(sample);
+        /** @type {!IComputation<T>|(function(): T)} */
+        const ai = array[i];
+        out[i] = typeof ai === 'object' ? ai.get() : ai();
       }
       return out;
     }
@@ -359,7 +370,7 @@ S.join = function (array) {
 /**
  * @const
  * @template T,U
- * @param {!IComputation<U>} ev
+ * @param {!IComputation<U>|(function(): U)} ev
  * @param {(function(U): T)|(function(U, T): T)} fn
  * @param {T=} seed 
  * @param {boolean=} track
@@ -368,6 +379,8 @@ S.join = function (array) {
  * @return {!IComputation<T>}
  */
 S.on = function (ev, fn, seed, track, onchanges, comparer) {
+  /** @type {!IComputation<U>} */
+  const sgn = typeof ev === 'object' ? ev : { get: ev };
 
   /**
    * @param {T=} seed
@@ -375,7 +388,7 @@ S.on = function (ev, fn, seed, track, onchanges, comparer) {
    */
   const on = seed => {
     /** @type {U} */
-    const result = ev.get();
+    const result = sgn.get();
     if (onchanges) {
       onchanges = false;
     } else {
@@ -422,7 +435,7 @@ S.freeze = function (fn) {
 /**
  * @const
  * @template T
- * @param {function(): T} fn
+ * @param {(function(): T)|!IComputation<T>} fn
  * @return {T}
  */
 S.sample = function (fn) {
@@ -430,11 +443,21 @@ S.sample = function (fn) {
   const listener = Listener;
   try {
     Listener = null;
-    return fn();
+    return typeof fn === 'function' ? fn() : fn.get();
   } finally {
     Listener = listener;
   }
 };
+
+/**
+ * @const
+ * @param {IComputation} node 
+ */
+S.renew = function (node) {
+  if (node instanceof Computation) {
+    liftComputation(node);
+  }
+}
 
 /**
  * @const
@@ -633,25 +656,15 @@ function logDataRead(data) {
 }
 
 /**
- * 
  * @param {!Computation} node 
- * @param {boolean=} sample
  */
-function logComputationRead(node, sample) {
+function liftComputation(node) {
   if ((node._state & 6) !== 0) {
     /** @type {!Queue<!Computation>} */
     const queue = RootClock._updates;
     applyUpstreamUpdates(node, queue._items);
   }
-  if (node._age === RootClock._time) {
-    if (node._state === 8 && !sample) {
-      throw new Error("Circular dependency.");
-    }
-    applyComputationUpdate(node);
-  }
-  if (!sample) {
-    logDataRead(node);
-  }
+  applyComputationUpdate(node);
 }
 
 /**

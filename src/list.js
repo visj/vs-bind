@@ -477,16 +477,6 @@ class MapPatcher extends Patcher {
 }
 
 /**
- * @template T
- * @param {!List<T>} list 
- * @param {function(!Array<T>, number): void} change 
- */
-function enqueue(list, change) {
-  list._queue[list._count++] = change;
-  logWrite(list, null);
-}
-
-/**
  * @template T,U
  * @param {IPatcher<T,U>} patcher
  * @param {!Array<T>} u
@@ -565,7 +555,7 @@ function reconcile(patcher, u) {
  */
 function mount(patcher, source) {
   S.cleanup(() => { dismount(patcher); });
-  return S.on(source, /** @param {!Array<T>} result @return {!Array<U>} */ (result) => {
+  return S.on(source, /** @param {!Array<T>} result @return {!Array<U>} */(result) => {
     return /** @type {!Array<U>} */(reconcile(patcher, result));;
   });
 }
@@ -587,12 +577,11 @@ function dismount(patcher) {
  * @return {U}
  */
 function enter(patcher, index) {
-  /** @type {U} */
-  let result;
-  const owner = /** @type {!Computation} */(Owner);
-  patcher._tempDisposers[index] = S.root((dispose) => {
+  return S.root((dispose) => {
+    patcher._tempDisposers[index] = dispose;
     /** @type {T} */
     const item = patcher._updates[index];
+    const owner = /** @type {!Computation} */(Owner);
     /** @type {(function(T): U)|(function(T, !IComputation<number>): U)} */
     const factory = patcher._factory;
     if (patcher._indexed) {
@@ -600,13 +589,10 @@ function enter(patcher, index) {
       const ti = patcher._tempIndices[index] = { data: null, index };
       /** @type {!IComputation<number>} */
       const i = ti.data = S.track(() => { logDataRead(owner); return ti.index; });
-      result = /** @type {function(T, !IComputation<number>): U} */(factory)(item, i);
-    } else {
-      result = /** @type {function(T): U} */(factory)(item);
+      return /** @type {function(T, !IComputation<number>): U} */(factory)(item, i);
     }
-    return dispose;
+    return /** @type {function(T): U} */(factory)(item);
   });
-  return result;
 }
 
 /**
@@ -649,31 +635,38 @@ function resolve(patcher, cStart, cEnd, uStart, uEnd) {
     /** @type {number|Array<number>|undefined} */
     const ex = map.get(uItem);
     if (ex != null) {
-      /** @type {number|undefined} */
-      let index;
       /** @type {boolean} */
-      let del = false;
-      if ((del = typeof ex == 'number')) {
-        index = ex;
-      } else {
-        del = (index = ex.pop()) == null;
-      }
-      if (del) {
+      const nbr = typeof ex === 'number';
+      /** @type {number|undefined} */
+      const index = nbr ? /** @type {number} */(ex) : /** @type {Array<number>} */(ex).pop();
+      if (nbr || index == null) {
         map.delete(uItem);
       }
       if (index != null) {
         preserved[index] = true;
         patcher.onMove(index, i);
-        continue;
+      } else {
+        patcher.onEnter(cStart);
       }
+    } else {
+      patcher.onEnter(cStart);
     }
-    patcher.onEnter(cStart);
   }
   for (i = cStart; i <= cEnd; i++) {
     if (!preserved[i]) {
       patcher.onExit(i);
     }
   }
+}
+
+/**
+ * @template T
+ * @param {!List<T>} list 
+ * @param {function(!Array<T>, number): void} change 
+ */
+function enqueue(list, change) {
+  list._queue[list._count++] = change;
+  logWrite(list, null);
 }
 
 /**

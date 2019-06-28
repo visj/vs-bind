@@ -1,12 +1,17 @@
+'use strict';
+
+Object.defineProperty(exports, '__esModule', { value: true });
+
+//@ts-nocheck
+
 /**
  * @record
  * @template T
  */
 class IComputation {
 
-  //@ts-ignore
-  /** @param {boolean=} sample @return {T} */
-  get(sample) { }
+  /** @return {T} */
+  get() { }
 }
 
 /**
@@ -24,13 +29,21 @@ IEnumerable.prototype.length;
  * @template T,U
  */
 class IPatcher {
-  
+
+  constructor() {
+    /** @type {!Array<T>} */
+    this._current;
+    /** @type {Array<T>} */
+    this._updates;
+    /** @type {(function(): Array<number>)|undefined} */
+    this._mutation;
+  }
+
   /** @param {number} ln */
   onSetup(ln) { }
 
   /** 
    * @param {number} index
-   //@ts-ignore
    * @return {U} 
    */
   onEnter(index) { }
@@ -55,7 +68,6 @@ class IPatcher {
    */
   onUnresolved(cStart, cEnd, uStart, uEnd) { }
 
-  //@ts-ignore
   /** @return {Array<U>} */
   onTeardown() { }
 
@@ -63,28 +75,11 @@ class IPatcher {
   onMutation(mutation) { }
 }
 
-//@ts-ignore
-/** @type {!Array<T>} */
-IPatcher.prototype._current;
-
-//@ts-ignore
-/** @type {Array<T>} */
-IPatcher.prototype._updates;
-
-/** @type {(function(): Array<number>)|undefined} */
-IPatcher.prototype._mutation;
-
 /**
  * @final
  * @interface
  */
 class NoValue { }
-
-
-
-
-
-const S = {};
 
 /**
  * @template T 
@@ -159,10 +154,16 @@ class Computation {
     this._cleanups = null;
   }
 
-  /** @param {boolean=} sample @return {T} */
-  get(sample) {
+  /** @return {T} */
+  get() {
     if (Listener !== null) {
-      logComputationRead(this, sample);
+      if ((this._state & 7) !== 0) {
+        liftComputation(this);
+      }
+      if (this._age === RootClock._time && this._state === 8) {
+        throw new Error("Circular dependency.");
+      }
+      logDataRead(this);
     }
     return this._value;
   }
@@ -195,11 +196,10 @@ class Data {
 
   /**
    * @final
-   * @param {boolean=} sample 
    * @return {T} 
    */
-  get(sample) {
-    if (!sample && Listener !== null) {
+  get() {
+    if (Listener !== null) {
       logDataRead(this);
     }
     return this._value;
@@ -349,6 +349,10 @@ let Slot = 0;
 /** @type {Computation} */
 let Recycled = null;
 
+
+/** @implements {ISwitch} */
+const S = {};
+
 /**
  * @const
  * @template T
@@ -359,7 +363,6 @@ let Recycled = null;
 S.run = function (fn, seed) {
   return makeComputationNode(fn, seed, getCandidateNode());
 };
-
 
 /**
  * @const
@@ -376,7 +379,7 @@ S.track = function (fn, seed, comparer) {
     node._comparer = comparer;
   }
   return makeComputationNode(fn, seed, node);
-}
+};
 
 /**
  * @const
@@ -418,29 +421,33 @@ S.root = function (fn) {
 };
 
 /**
+ * @const
  * @template T
- * @param {!Array<!IComputation<T>>} array
+ * @param {!Array<!IComputation<T>|(function(): T)>} array
  * @return {!IComputation<!Array<T>>}
  */
 S.join = function (array) {
-  /** @type {number} */
-  const ln = array.length;
-  /** @type {!Array<T>} */
-  const out = [];
   return {
-    get: /** @param {boolean=} sample @return {!Array<T>} */ sample => {
+    /** @return {!Array<T>} */
+    get() {
+      /** @type {number} */
+      const ln = array.length;
+      /** @type {!Array<T>} */
+      const out = new Array(ln);
       for (let /** number */ i = 0; i < ln; i++) {
-        out[i] = array[i].get(sample);
+        /** @type {!IComputation<T>|(function(): T)} */
+        const ai = array[i];
+        out[i] = typeof ai === 'object' ? ai.get() : ai();
       }
       return out;
     }
   };
-}
+};
 
 /**
  * @const
  * @template T,U
- * @param {!IComputation<U>} ev
+ * @param {!IComputation<U>|(function(): U)} ev
  * @param {(function(U): T)|(function(U, T): T)} fn
  * @param {T=} seed 
  * @param {boolean=} track
@@ -449,6 +456,8 @@ S.join = function (array) {
  * @return {!IComputation<T>}
  */
 S.on = function (ev, fn, seed, track, onchanges, comparer) {
+  /** @type {!IComputation<U>} */
+  const sgn = typeof ev === 'object' ? ev : { get: ev };
 
   /**
    * @param {T=} seed
@@ -456,7 +465,7 @@ S.on = function (ev, fn, seed, track, onchanges, comparer) {
    */
   const on = seed => {
     /** @type {U} */
-    const result = ev.get();
+    const result = sgn.get();
     if (onchanges) {
       onchanges = false;
     } else {
@@ -503,7 +512,7 @@ S.freeze = function (fn) {
 /**
  * @const
  * @template T
- * @param {function(): T} fn
+ * @param {(function(): T)|!IComputation<T>} fn
  * @return {T}
  */
 S.sample = function (fn) {
@@ -511,9 +520,19 @@ S.sample = function (fn) {
   const listener = Listener;
   try {
     Listener = null;
-    return fn();
+    return typeof fn === 'function' ? fn() : fn.get();
   } finally {
     Listener = listener;
+  }
+};
+
+/**
+ * @const
+ * @param {IComputation} node 
+ */
+S.renew = function (node) {
+  if (node instanceof Computation) {
+    liftComputation(node);
   }
 };
 
@@ -714,25 +733,15 @@ function logDataRead(data) {
 }
 
 /**
- * 
  * @param {!Computation} node 
- * @param {boolean=} sample
  */
-function logComputationRead(node, sample) {
+function liftComputation(node) {
   if ((node._state & 6) !== 0) {
     /** @type {!Queue<!Computation>} */
     const queue = RootClock._updates;
     applyUpstreamUpdates(node, queue._items);
   }
-  if (node._age === RootClock._time) {
-    if (node._state === 8 && !sample) {
-      throw new Error("Circular dependency.");
-    }
-    applyComputationUpdate(node);
-  }
-  if (!sample) {
-    logDataRead(node);
-  }
+  applyComputationUpdate(node);
 }
 
 /**
@@ -802,7 +811,7 @@ function event() {
   const owner = Owner;
   RootClock._updates.reset();
   try {
-    run(RootClock)
+    run(RootClock);
   }
   finally {
     Owner = owner;
@@ -1145,12 +1154,6 @@ function disposeComputation(node) {
   cleanup(node, true);
 }
 
-
-
-
-
-
-
 /**
  * @template T 
  * @extends {Data<!Array<T>>}
@@ -1288,7 +1291,7 @@ class List extends Data {
    */
   removeAt(index) {
     enqueue(this, /** @param {!Array<T>} array @param {number} ln */(array, ln) => {
-      removeAt(array, index, ln)
+      removeAt(array, index, ln);
     });
   }
 
@@ -1314,7 +1317,7 @@ class List extends Data {
       if (ln && index >= 0 && index < ln) {
         array[index] = value;
       }
-    })
+    });
   }
 
   /**
@@ -1351,33 +1354,6 @@ class List extends Data {
    */
   map(fn) {
     return this.enumerable().map(fn);
-  }
-}
-
-/**
- * @template T
- * @extends {List<T>}
- */
-class Observable extends List {
-
-  /**
-   * 
-   * @param {!Array<T>} value 
-   */
-  constructor(value) {
-    super(value);
-    /**
-     * @private 
-     * @type {Array<number>} */
-    this._mutation = null;
-  }
-
-  /**
-   * @override
-   * @return {Enumerable<T>}
-   */
-  enumerable() {
-    return new Enumerable(this, () => this._mutation);
   }
 }
 
@@ -1614,16 +1590,6 @@ class MapPatcher extends Patcher {
 }
 
 /**
- * @template T
- * @param {!List<T>} list 
- * @param {function(!Array<T>, number): void} change 
- */
-function enqueue(list, change) {
-  list._queue[list._count++] = change;
-  logWrite(list, null);
-}
-
-/**
  * @template T,U
  * @param {IPatcher<T,U>} patcher
  * @param {!Array<T>} u
@@ -1702,9 +1668,8 @@ function reconcile(patcher, u) {
  */
 function mount(patcher, source) {
   S.cleanup(() => { dismount(patcher); });
-  return S.on(source, /** @param {!Array<T>} result @return {!Array<U>} */ (result) => {
-    return /** @type {!Array<U>} */(reconcile(patcher, result));;
-  });
+  return S.on(source, /** @param {!Array<T>} result @return {!Array<U>} */(result) => {
+    return /** @type {!Array<U>} */(reconcile(patcher, result));  });
 }
 
 /**
@@ -1724,12 +1689,11 @@ function dismount(patcher) {
  * @return {U}
  */
 function enter(patcher, index) {
-  /** @type {U} */
-  let result;
-  const owner = /** @type {!Computation} */(Owner);
-  patcher._tempDisposers[index] = S.root((dispose) => {
+  return S.root((dispose) => {
+    patcher._tempDisposers[index] = dispose;
     /** @type {T} */
     const item = patcher._updates[index];
+    const owner = /** @type {!Computation} */(Owner);
     /** @type {(function(T): U)|(function(T, !IComputation<number>): U)} */
     const factory = patcher._factory;
     if (patcher._indexed) {
@@ -1737,13 +1701,10 @@ function enter(patcher, index) {
       const ti = patcher._tempIndices[index] = { data: null, index };
       /** @type {!IComputation<number>} */
       const i = ti.data = S.track(() => { logDataRead(owner); return ti.index; });
-      result = /** @type {function(T, !IComputation<number>): U} */(factory)(item, i);
-    } else {
-      result = /** @type {function(T): U} */(factory)(item);
+      return /** @type {function(T, !IComputation<number>): U} */(factory)(item, i);
     }
-    return dispose;
+    return /** @type {function(T): U} */(factory)(item);
   });
-  return result;
 }
 
 /**
@@ -1786,31 +1747,38 @@ function resolve(patcher, cStart, cEnd, uStart, uEnd) {
     /** @type {number|Array<number>|undefined} */
     const ex = map.get(uItem);
     if (ex != null) {
-      /** @type {number|undefined} */
-      let index;
       /** @type {boolean} */
-      let del = false;
-      if ((del = typeof ex == 'number')) {
-        index = ex;
-      } else {
-        del = (index = ex.pop()) == null;
-      }
-      if (del) {
+      const nbr = typeof ex === 'number';
+      /** @type {number|undefined} */
+      const index = nbr ? /** @type {number} */(ex) : /** @type {Array<number>} */(ex).pop();
+      if (nbr || index == null) {
         map.delete(uItem);
       }
       if (index != null) {
         preserved[index] = true;
         patcher.onMove(index, i);
-        continue;
+      } else {
+        patcher.onEnter(cStart);
       }
+    } else {
+      patcher.onEnter(cStart);
     }
-    patcher.onEnter(cStart);
   }
   for (i = cStart; i <= cEnd; i++) {
     if (!preserved[i]) {
       patcher.onExit(i);
     }
   }
+}
+
+/**
+ * @template T
+ * @param {!List<T>} list 
+ * @param {function(!Array<T>, number): void} change 
+ */
+function enqueue(list, change) {
+  list._queue[list._count++] = change;
+  logWrite(list, null);
 }
 
 /**
@@ -1891,18 +1859,17 @@ function insertRange(array, ln, index, values) {
   }
 }
 
-module.exports = {
-  IPatcher,
-  IComputation,
-  IEnumerable,
-  S,
-  Data,
-  Value,
-  List,
-  Enumerable,
-  Patcher,
-  MapPatcher,
-  mount,
-  dismount,
-  reconcile,
-}
+exports.Data = Data;
+exports.Enumerable = Enumerable;
+exports.IComputation = IComputation;
+exports.IEnumerable = IEnumerable;
+exports.IPatcher = IPatcher;
+exports.List = List;
+exports.MapPatcher = MapPatcher;
+exports.NoValue = NoValue;
+exports.Patcher = Patcher;
+exports.S = S;
+exports.Value = Value;
+exports.dismount = dismount;
+exports.mount = mount;
+exports.reconcile = reconcile;

@@ -7,7 +7,7 @@
     var IComputation = (function () {
         function IComputation() {
         }
-        IComputation.prototype.get = function (sample) { };
+        IComputation.prototype.get = function () { };
         return IComputation;
     }());
     var IEnumerable = (function () {
@@ -31,6 +31,11 @@
     IPatcher.prototype._current;
     IPatcher.prototype._updates;
     IPatcher.prototype._mutation;
+    var NoValue = (function () {
+        function NoValue() {
+        }
+        return NoValue;
+    }());
 
     var __extends = (undefined && undefined.__extends) || (function () {
         var extendStatics = function (d, b) {
@@ -45,7 +50,6 @@
             d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
         };
     })();
-    var S = {};
     var Computation = (function () {
         function Computation() {
             this._value = null;
@@ -65,9 +69,15 @@
             this._owned = null;
             this._cleanups = null;
         }
-        Computation.prototype.get = function (sample) {
-            if (!sample && Listener != null) {
-                logComputationRead(this);
+        Computation.prototype.get = function () {
+            if (Listener !== null) {
+                if ((this._state & 7) !== 0) {
+                    liftComputation(this);
+                }
+                if (this._age === RootClock._time && this._state === 8) {
+                    throw new Error("Circular dependency.");
+                }
+                logDataRead(this);
             }
             return this._value;
         };
@@ -79,8 +89,8 @@
             this._log = null;
             this._pending = NOT_PENDING;
         }
-        Data.prototype.get = function (sample) {
-            if (!sample && Listener !== null) {
+        Data.prototype.get = function () {
+            if (Listener !== null) {
                 logDataRead(this);
             }
             return this._value;
@@ -153,13 +163,14 @@
     var Listener = null;
     var Slot = 0;
     var Recycled = null;
+    var S = {};
     S.run = function (fn, seed) {
         return makeComputationNode(fn, seed, getCandidateNode());
     };
     S.track = function (fn, seed, comparer) {
-        var node = (getCandidateNode());
+        var node = getCandidateNode();
         node._onchange = true;
-        if (comparer != null) {
+        if (comparer !== void 0) {
             node._comparer = comparer;
         }
         return makeComputationNode(fn, seed, node);
@@ -193,20 +204,22 @@
         }
     };
     S.join = function (array) {
-        var ln = array.length;
-        var out = [];
         return {
-            get: function (sample) {
+            get: function () {
+                var ln = array.length;
+                var out = new Array(ln);
                 for (var i = 0; i < ln; i++) {
-                    out[i] = array[i].get(sample);
+                    var ai = array[i];
+                    out[i] = typeof ai === 'object' ? ai.get() : ai();
                 }
                 return out;
             }
         };
     };
     S.on = function (ev, fn, seed, track, onchanges, comparer) {
+        var sgn = typeof ev === 'object' ? ev : { get: ev };
         var on = function (seed) {
-            var result = ev.get();
+            var result = sgn.get();
             if (onchanges) {
                 onchanges = false;
             }
@@ -246,10 +259,15 @@
         var listener = Listener;
         try {
             Listener = null;
-            return fn();
+            return typeof fn === 'function' ? fn() : fn.get();
         }
         finally {
             Listener = listener;
+        }
+    };
+    S.renew = function (node) {
+        if (node instanceof Computation) {
+            liftComputation(node);
         }
     };
     S.cleanup = function (fn) {
@@ -284,7 +302,7 @@
         var listener = Listener;
         var toplevel = RunningClock === null;
         Owner = Listener = node;
-        value = toplevel ? execToplevelComputation(fn, value) : fn(value);
+        value = toplevel ? execToplevelComputation((fn), value) : fn(value);
         Owner = owner;
         Listener = listener;
         var recycled = recycleOrClaimNode(node, fn, value);
@@ -381,18 +399,12 @@
         }
         logRead(log);
     }
-    function logComputationRead(node) {
+    function liftComputation(node) {
         if ((node._state & 6) !== 0) {
             var queue = RootClock._updates;
             applyUpstreamUpdates(node, queue._items);
         }
-        if (node._age === RootClock._time) {
-            if (node._state === 8) {
-                throw new Error("Circular dependency.");
-            }
-            applyComputationUpdate(node);
-        }
-        logDataRead(node);
+        applyComputationUpdate(node);
     }
     function logRead(from) {
         var fromslot;
@@ -924,10 +936,6 @@
         };
         return MapPatcher;
     }(Patcher));
-    function enqueue(list, change) {
-        list._queue[list._count++] = change;
-        logWrite(list, null);
-    }
     function reconcile(patcher, u) {
         var ln = u.length;
         patcher._updates = u;
@@ -1000,22 +1008,18 @@
         }
     }
     function enter(patcher, index) {
-        var result;
-        var owner = (Owner);
-        patcher._tempDisposers[index] = S.root(function (dispose) {
+        return S.root(function (dispose) {
+            patcher._tempDisposers[index] = dispose;
             var item = patcher._updates[index];
+            var owner = (Owner);
             var factory = patcher._factory;
             if (patcher._indexed) {
                 var ti_1 = patcher._tempIndices[index] = { data: null, index: index };
                 var i = ti_1.data = S.track(function () { logDataRead(owner); return ti_1.index; });
-                result = (factory)(item, i);
+                return (factory)(item, i);
             }
-            else {
-                result = (factory)(item);
-            }
-            return dispose;
+            return (factory)(item);
         });
-        return result;
     }
     function resolve(patcher, cStart, cEnd, uStart, uEnd) {
         var c = patcher._current;
@@ -1042,30 +1046,32 @@
             var uItem = u[i];
             var ex = map.get(uItem);
             if (ex != null) {
-                var index = void 0;
-                var del = false;
-                if ((del = typeof ex == 'number')) {
-                    index = ex;
-                }
-                else {
-                    del = (index = ex.pop()) == null;
-                }
-                if (del) {
+                var nbr = typeof ex === 'number';
+                var index = nbr ? (ex) : (ex).pop();
+                if (nbr || index == null) {
                     map.delete(uItem);
                 }
                 if (index != null) {
                     preserved[index] = true;
                     patcher.onMove(index, i);
-                    continue;
+                }
+                else {
+                    patcher.onEnter(cStart);
                 }
             }
-            patcher.onEnter(cStart);
+            else {
+                patcher.onEnter(cStart);
+            }
         }
         for (i = cStart; i <= cEnd; i++) {
             if (!preserved[i]) {
                 patcher.onExit(i);
             }
         }
+    }
+    function enqueue(list, change) {
+        list._queue[list._count++] = change;
+        logWrite(list, null);
     }
     function move(array, ln, from, to) {
         from = from < 0 ? ln + from : from;
@@ -1118,6 +1124,7 @@
     exports.IPatcher = IPatcher;
     exports.List = List;
     exports.MapPatcher = MapPatcher;
+    exports.NoValue = NoValue;
     exports.Patcher = Patcher;
     exports.S = S;
     exports.Value = Value;

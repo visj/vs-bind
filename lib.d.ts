@@ -1,31 +1,32 @@
 export interface IComputation<T = any> {
-  get(sample?: boolean): T;
+  get(): T;
 }
 
-interface S {
+interface ISwitch {
   root<T>(fn: (dispose?: () => void) => T): T;
   run<T>(fn: () => T): IComputation<T>;
   run<T>(fn: (seed: T) => T, seed: T, comparer?: (previous: T, current: T) => boolean): IComputation<T>;
   track<T>(fn: () => T): IComputation<T>;
   track<T>(fn: (seed: T) => T, seed: T): IComputation<T>;
-  on<T, U>(ev: IComputation<U>, fn: (result: U) => T): IComputation<T>;
-  on<T, U>(ev: IComputation<U>, fn: (result: U, seed: T) => T, seed: T, track?: boolean, onchanges?: boolean, comparer?: (previous: T, current: T) => boolean): IComputation<T>;
-  join<T extends IComputation[]>(array: T): IComputation<T extends Array<IComputation<infer U>> ? U[] : any>;
+  on<T, U>(ev: IComputation<U> | (() => U), fn: (result: U) => T): IComputation<T>;
+  on<T, U>(ev: IComputation<U> | (() => U), fn: (result: U, seed: T) => T, seed: T, track?: boolean, onchanges?: boolean, comparer?: (previous: T, current: T) => boolean): IComputation<T>;
+  join<T extends Array<IComputation | (() => any)>>(array: T): IComputation<T extends Array<IComputation<infer U>> ? U[] : T extends Array<(() => infer U)> ? U[] : any>;
   frozen(): boolean;
   listening(): boolean;
   freeze<T>(fn: () => T): T;
-  sample<T>(fn: () => T): T;
+  renew(node: IComputation): void;
+  sample<T>(fn: (() => T) | IComputation<T>): T;
   dispose(node: IComputation): void;
   cleanup(fn: (final?: boolean) => void): void;
 }
 
-export declare const S: S;
+export declare const S: ISwitch;
 
 export class Data<T> implements IComputation<T> {
 
   constructor(value: T);
 
-  get(sample?: boolean): T;
+  get(): T;
   set(value: T): T;
 }
 

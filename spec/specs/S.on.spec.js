@@ -37,7 +37,6 @@ describe("S.on(...)", function () {
                 f = S.on(S.join([a, b, c]), function () { spy(); });
 
             expect(spy.calls.count()).toBe(1);
-
             a.set(4);
             b.set(5);
             c.set(6);

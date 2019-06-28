@@ -1,13 +1,16 @@
-export default {
-  input: 'dist/bench/index.js',
-  output: {
-    name: '_S_',
-    file: 'benchmark/src/dist/Actual.js',
-    format: 'umd'
+export default [
+  {
+    input: 'src/index.js',
+    output: {
+      file: 'dist/es/vs-bind.js',
+      format: 'esm'
+    }
   },
-  onwarn: function (warning) {
-    if (warning.code === 'THIS_IS_UNDEFINED') {
-      return;
+  {
+    input: 'src/index.js',
+    output: {
+      file: 'dist/vs-bind.js',
+      format: 'cjs'
     }
   }
-}
+]
