@@ -431,13 +431,31 @@ S.join = function (array) {
       /** @type {!Array<T>} */
       const out = new Array(ln);
       for (let /** number */ i = 0; i < ln; i++) {
-        /** @type {!IComputation<T>|(function(): T)} */
-        const ai = array[i];
-        out[i] = typeof ai === 'object' ? ai.get() : ai();
+        out[i] = S.call(array[i]);
       }
       return out;
     }
   };
+};
+
+/**
+ * @const 
+ * @template T
+ * @param {!IComputation<T>|(function(): T)} ev 
+ * @return {!IComputation<T>}
+ */
+S.bind = function(ev) {
+  return typeof ev === 'object' ? ev : { get: ev };
+};
+
+/**
+ * @const 
+ * @template T 
+ * @param {!IComputation<T>|(function(): T)} ev 
+ * @return {T}
+ */
+S.call = function(ev) {
+  return typeof ev === 'object' ? ev.get() : ev();
 };
 
 /**
@@ -453,7 +471,7 @@ S.join = function (array) {
  */
 S.on = function (ev, fn, seed, track, onchanges, comparer) {
   /** @type {!IComputation<U>} */
-  const sgn = typeof ev === 'object' ? ev : { get: ev };
+  const sgn = S.bind(ev);
 
   /**
    * @param {T=} seed
@@ -516,7 +534,7 @@ S.sample = function (fn) {
   const listener = Listener;
   try {
     Listener = null;
-    return typeof fn === 'function' ? fn() : fn.get();
+    return S.call(fn);
   } finally {
     Listener = listener;
   }

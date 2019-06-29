@@ -18,6 +18,9 @@
     IEnumerable.prototype.length;
     var IPatcher = (function () {
         function IPatcher() {
+            this._current;
+            this._updates;
+            this._mutation;
         }
         IPatcher.prototype.onSetup = function (ln) { };
         IPatcher.prototype.onEnter = function (index) { };
@@ -28,9 +31,6 @@
         IPatcher.prototype.onMutation = function (mutation) { };
         return IPatcher;
     }());
-    IPatcher.prototype._current;
-    IPatcher.prototype._updates;
-    IPatcher.prototype._mutation;
     var NoValue = (function () {
         function NoValue() {
         }
@@ -209,15 +209,20 @@
                 var ln = array.length;
                 var out = new Array(ln);
                 for (var i = 0; i < ln; i++) {
-                    var ai = array[i];
-                    out[i] = typeof ai === 'object' ? ai.get() : ai();
+                    out[i] = S.call(array[i]);
                 }
                 return out;
             }
         };
     };
+    S.bind = function (ev) {
+        return typeof ev === 'object' ? ev : { get: ev };
+    };
+    S.call = function (ev) {
+        return typeof ev === 'object' ? ev.get() : ev();
+    };
     S.on = function (ev, fn, seed, track, onchanges, comparer) {
-        var sgn = typeof ev === 'object' ? ev : { get: ev };
+        var sgn = S.bind(ev);
         var on = function (seed) {
             var result = sgn.get();
             if (onchanges) {
@@ -259,7 +264,7 @@
         var listener = Listener;
         try {
             Listener = null;
-            return typeof fn === 'function' ? fn() : fn.get();
+            return S.call(fn);
         }
         finally {
             Listener = listener;
