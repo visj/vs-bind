@@ -46,6 +46,22 @@ class ISwitch {
    */
   join(array) { }
 
+
+  /**
+   * @template T
+   * @param {!IComputation<T>|(function(): T)|T} ev 
+   * @return {!IComputation<T>}
+   */
+  bind(ev) { }
+
+  /**
+   * @template T 
+   * @param {!IComputation<T>|(function(): T)|T} ev 
+   * @return {T}
+   */
+  call(ev) { }
+
+
   /**
    * @template T,U
    * @param {!IComputation<U>} ev

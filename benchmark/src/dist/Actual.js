@@ -209,20 +209,20 @@
                 var ln = array.length;
                 var out = new Array(ln);
                 for (var i = 0; i < ln; i++) {
-                    out[i] = S.call(array[i]);
+                    out[i] = (normalizeBinding(array[i], true));
                 }
                 return out;
             }
         };
     };
     S.bind = function (ev) {
-        return typeof ev === 'object' ? ev : { get: ev };
+        return normalizeBinding(ev);
     };
     S.call = function (ev) {
-        return typeof ev === 'object' ? ev.get() : ev();
+        return (normalizeBinding(ev, true));
     };
     S.on = function (ev, fn, seed, track, onchanges, comparer) {
-        var sgn = S.bind(ev);
+        var sgn = (normalizeBinding(ev));
         var on = function (seed) {
             var result = sgn.get();
             if (onchanges) {
@@ -264,7 +264,7 @@
         var listener = Listener;
         try {
             Listener = null;
-            return S.call(fn);
+            return (normalizeBinding(fn, true));
         }
         finally {
             Listener = listener;
@@ -348,6 +348,14 @@
             return (node);
         }
         return new Computation();
+    }
+    function normalizeBinding(data, call) {
+        var type = typeof data;
+        return (type === 'object' ?
+            call ? (data).get() : (data) :
+            type === 'function' ?
+                call ? (data)() : { get: (data) } :
+                (data));
     }
     function recycleOrClaimNode(node, fn, value, orphan) {
         var _owner = (orphan || Owner === null || Owner === NOT_OWNED) ? null : Owner;

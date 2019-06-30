@@ -12,8 +12,8 @@ interface ISwitch {
   track<T>(fn: (seed: T) => T, seed: T): IComputation<T>;
   on<T, U>(ev: Binding<U>, fn: (result: U) => T): IComputation<T>;
   on<T, U>(ev: Binding<U>, fn: (result: U, seed: T) => T, seed: T, track?: boolean, onchanges?: boolean, comparer?: (previous: T, current: T) => boolean): IComputation<T>;
-  bind<T>(ev: Binding<T>): IComputation<T>;
-  call<T>(ev: Binding<T>): T;
+  bind<T>(ev: Binding<T> | T): IComputation<T> | T;
+  call<T>(ev: Binding<T> | T): T;
   join<T extends Array<Binding>>(array: T): IComputation<T extends Array<IComputation<infer U>> ? U[] : T extends Array<(() => infer U)> ? U[] : any>;
   frozen(): boolean;
   listening(): boolean;

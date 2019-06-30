@@ -1,6 +1,5 @@
 java -jar ../closure-compiler.jar \
     --compilation_level=ADVANCED \
-    --formatting=PRETTY_PRINT \
     --module_resolution=NODE \
     --warning_level=VERBOSE \
     --language_in=STABLE \

@@ -435,7 +435,7 @@ S.join = function (array) {
       /** @type {!Array<T>} */
       const out = new Array(ln);
       for (let /** number */ i = 0; i < ln; i++) {
-        out[i] = S.call(array[i]);
+        out[i] = /** @type {T} */(normalizeBinding(array[i], true));
       }
       return out;
     }
@@ -445,21 +445,21 @@ S.join = function (array) {
 /**
  * @const 
  * @template T
- * @param {!IComputation<T>|(function(): T)} ev 
- * @return {!IComputation<T>}
+ * @param {IComputation<T>|(function(): T)|T} ev 
+ * @return {!IComputation<T>|T}
  */
-S.bind = function(ev) {
-  return typeof ev === 'object' ? ev : { get: ev };
+S.bind = function (ev) {
+  return normalizeBinding(ev);
 };
 
 /**
  * @const 
  * @template T 
- * @param {!IComputation<T>|(function(): T)} ev 
+ * @param {IComputation<T>|(function(): T)|T} ev 
  * @return {T}
  */
-S.call = function(ev) {
-  return typeof ev === 'object' ? ev.get() : ev();
+S.call = function (ev) {
+  return /** @type {T} */(normalizeBinding(ev, true));
 };
 
 /**
@@ -475,7 +475,7 @@ S.call = function(ev) {
  */
 S.on = function (ev, fn, seed, track, onchanges, comparer) {
   /** @type {!IComputation<U>} */
-  const sgn = S.bind(ev);
+  const sgn = /** @type {!IComputation<U>} */(normalizeBinding(ev));
 
   /**
    * @param {T=} seed
@@ -538,7 +538,7 @@ S.sample = function (fn) {
   const listener = Listener;
   try {
     Listener = null;
-    return S.call(fn);
+    return /** @type {T} */(normalizeBinding(fn, true));
   } finally {
     Listener = listener;
   }
@@ -677,6 +677,24 @@ function getCandidateNode() {
     return /** @type {!Computation<T>} */(node);
   }
   return new Computation();
+}
+
+/**
+ * @template T
+ * @param {T|(function(): T)|IComputation<T>} data 
+ * @param {boolean=} call
+ * @return {T|IComputation<T>} 
+ */
+function normalizeBinding(data, call) {
+  /** @type {string} */
+  const type = typeof data;
+  return (
+    type === 'object' ? 
+      call ? /** @type {IComputation<T>} */(data).get() : /** @type {IComputation<T>} */(data) : 
+    type === 'function' ? 
+      call ? /** @type {function(): T} */(data)() : { get: /** @type {function(): T} */(data) } : 
+    /** @type {T} */(data)
+  );
 }
 
 /**
