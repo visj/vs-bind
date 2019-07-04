@@ -288,7 +288,7 @@ describe("S.run()", function () {
     it("throws when cycle created by modifying a branch", function () {
       S.root(function () {
         var d = new Data(1),
-          f = S.run(function () { return f ? f() : d.get(); });
+          f = S.run(function () { return f ? f.get() : d.get(); });
 
         expect(function () { d.set(0); }).toThrow();
       });

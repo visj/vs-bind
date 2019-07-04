@@ -2,24 +2,21 @@ export interface IComputation<T = any> {
   get(): T;
 }
 
-export type Binding<T = any> = IComputation<T> | (() => T);
-
 interface ISwitch {
   root<T>(fn: (dispose?: () => void) => T): T;
   run<T>(fn: () => T): IComputation<T>;
   run<T>(fn: (seed: T) => T, seed: T, comparer?: (previous: T, current: T) => boolean): IComputation<T>;
   track<T>(fn: () => T): IComputation<T>;
   track<T>(fn: (seed: T) => T, seed: T): IComputation<T>;
-  on<T, U>(ev: Binding<U>, fn: (result: U) => T): IComputation<T>;
-  on<T, U>(ev: Binding<U>, fn: (result: U, seed: T) => T, seed: T, track?: boolean, onchanges?: boolean, comparer?: (previous: T, current: T) => boolean): IComputation<T>;
-  bind<T>(ev: Binding<T> | T): IComputation<T> | T;
-  call<T>(ev: Binding<T> | T): T;
-  join<T extends Array<Binding>>(array: T): IComputation<T extends Array<IComputation<infer U>> ? U[] : T extends Array<(() => infer U)> ? U[] : any>;
+  on<T, U>(ev: IComputation<U>, fn: (result: U) => T): IComputation<T>;
+  on<T, U>(ev: IComputation<U>, fn: (result: U, seed: T) => T, seed: T, track?: boolean, onchanges?: boolean, comparer?: (previous: T, current: T) => boolean): IComputation<T>;
+  wrap<T, U>(node: IComputation<T>, selector: (node: T) => U): IComputation<U>;
+  join<T extends Array<IComputation>>(array: T): IComputation<T extends Array<IComputation<infer U>> ? U[] : any>;
   frozen(): boolean;
   listening(): boolean;
   freeze<T>(fn: () => T): T;
   renew(node: IComputation): void;
-  sample<T>(fn: Binding<T>): T;
+  sample<T>(fn: IComputation<T>): T;
   dispose(node: IComputation): void;
   cleanup(fn: (final?: boolean) => void): void;
 }

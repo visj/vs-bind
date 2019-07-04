@@ -171,4 +171,30 @@ describe('S.track', function() {
 			s1.set(4); // parent updates, so copy is disposed
 		});
 	});
+
+	it('handles nested pending owners', () => {
+		S.root(() => {
+			let s1 = new Data(0);
+			let spy = jasmine.createSpy();
+			let c;
+			S.run(() => {
+				s1.get();
+				if (c) {
+					c.get();
+				}
+			});
+			let t1 = S.track(() => s1.get() > 2);
+			let t2 = S.track(() => s1.get() > 1);
+			S.run(() => {
+				t1.get();
+				S.run(() => {
+					if (!t2.get()) {
+						c = S.on(s1, spy);
+					}
+				});
+			});
+			s1.set(2);
+			expect(spy.calls.count()).toBe(1);
+		});
+	});
 });

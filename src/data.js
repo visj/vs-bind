@@ -58,7 +58,15 @@ class Computation {
     /**
      * @private 
      * @type {number} */
+    this._ownerage = -1;
+    /**
+     * @private 
+     * @type {number} */
     this._dependents = 0;
+    /**
+     * @private 
+     * @type {number} */
+    this._dependentslot = 0;
     /**
      * @private 
      * @type {Array<number>} */
@@ -86,7 +94,9 @@ class Computation {
       if (this._age === RootClock._time && this._state === 8) {
         throw new Error("Circular dependency.");
       }
-      logDataRead(this);
+      if (this._state !== 16) {
+        logDataRead(this);
+      }
     }
     return this._value;
   }
@@ -346,7 +356,7 @@ S.root = function (fn) {
 /**
  * @const
  * @template T
- * @param {!Array<!IComputation<T>|(function(): T)>} array
+ * @param {!Array<!IComputation<T>>} array
  * @return {!IComputation<!Array<T>>}
  */
 S.join = function (array) {
@@ -358,7 +368,7 @@ S.join = function (array) {
       /** @type {!Array<T>} */
       const out = new Array(ln);
       for (let /** number */ i = 0; i < ln; i++) {
-        out[i] = /** @type {T} */(normalizeBinding(array[i], true));
+        out[i] = array[i].get();
       }
       return out;
     }
@@ -367,28 +377,19 @@ S.join = function (array) {
 
 /**
  * @const 
- * @template T
- * @param {IComputation<T>|(function(): T)|T} ev 
- * @return {!IComputation<T>|T}
+ * @template T,U
+ * @param {!IComputation<T>} node 
+ * @param {function(T): U} selector
+ * @return {!IComputation<U>}
  */
-S.bind = function (ev) {
-  return normalizeBinding(ev);
-}
-
-/**
- * @const 
- * @template T 
- * @param {IComputation<T>|(function(): T)|T} ev 
- * @return {T}
- */
-S.call = function (ev) {
-  return /** @type {T} */(normalizeBinding(ev, true));
+S.wrap = function (node, selector) {
+  return { get: () => selector(node.get()) };
 }
 
 /**
  * @const
  * @template T,U
- * @param {!IComputation<U>|(function(): U)} ev
+ * @param {!IComputation<U>} ev
  * @param {(function(U): T)|(function(U, T): T)} fn
  * @param {T=} seed 
  * @param {boolean=} track
@@ -397,8 +398,6 @@ S.call = function (ev) {
  * @return {!IComputation<T>}
  */
 S.on = function (ev, fn, seed, track, onchanges, comparer) {
-  /** @type {!IComputation<U>} */
-  const sgn = /** @type {!IComputation<U>} */(normalizeBinding(ev));
 
   /**
    * @param {T=} seed
@@ -406,7 +405,7 @@ S.on = function (ev, fn, seed, track, onchanges, comparer) {
    */
   const on = seed => {
     /** @type {U} */
-    const result = sgn.get();
+    const result = ev.get();
     if (onchanges) {
       onchanges = false;
     } else {
@@ -453,7 +452,7 @@ S.freeze = function (fn) {
 /**
  * @const
  * @template T
- * @param {(function(): T)|!IComputation<T>} fn
+ * @param {!IComputation<T>} fn
  * @return {T}
  */
 S.sample = function (fn) {
@@ -461,7 +460,7 @@ S.sample = function (fn) {
   const listener = Listener;
   try {
     Listener = null;
-    return /** @type {T} */(normalizeBinding(fn, true));
+    return fn.get();
   } finally {
     Listener = listener;
   }
@@ -604,24 +603,6 @@ function getCandidateNode() {
 
 /**
  * @template T
- * @param {T|(function(): T)|IComputation<T>} data 
- * @param {boolean=} call
- * @return {T|IComputation<T>} 
- */
-function normalizeBinding(data, call) {
-  /** @type {string} */
-  const type = typeof data;
-  return (
-    type === 'object' ? 
-      call ? /** @type {IComputation<T>} */(data).get() : /** @type {IComputation<T>} */(data) : 
-    type === 'function' ? 
-      call ? /** @type {function(): T} */(data)() : { get: /** @type {function(): T} */(data) } : 
-    /** @type {T} */(data)
-  );
-}
-
-/**
- * @template T
  * @param {Computation} node 
  * @param {(function(T=): T)|null} fn 
  * @param {T} value 
@@ -692,6 +673,9 @@ function logDataRead(data) {
 }
 
 /**
+ * Lift a computation node, 
+ * which ensures we return an 
+ * up to date value.
  * @param {!Computation} node 
  */
 function liftComputation(node) {
@@ -823,13 +807,11 @@ function applyDataUpdate(data) {
  * @param {!Computation<T>} node 
  */
 function applyComputationUpdate(node) {
-  if ((node._state & 2) !== 0) {
-    if (--node._dependents === 0) {
-      node._state &= ~6;
-      node._ownerslot = -1;
-      node._dependentslots = null;
+  if ((node._state & 2) !== 0) { // pending
+    if (++node._dependentslot === node._dependents) {
+      restore(node);
     }
-  } else if ((node._state & 1) !== 0) {
+  } else if ((node._state & 1) !== 0) { // stale
     if (node._onchange) {
       /** @type {T} */
       const current = updateComputation(node);
@@ -855,12 +837,10 @@ function updateComputation(node) {
   /** @type {Computation} */
   const listener = Listener;
   Owner = Listener = node;
-  node._state = 8;
+  node._state = 8; // running
   cleanup(node, false);
   node._value = node._fn(node._value);
-  node._state = 0;
-  node._dependents = 0;
-  node._dependentslots = null;
+  restore(node);
   Owner = owner;
   Listener = listener;
   return value;
@@ -874,7 +854,7 @@ function stateStale(node) {
   /** @type {number} */
   const time = RootClock._time;
   if (node._age < time) {
-    node._state |= 1;
+    node._state |= 1; // stale
     node._age = time;
     setDownstreamState(node, node._onchange);
   }
@@ -888,15 +868,13 @@ function statePending(node) {
   /** @type {number} */
   const time = RootClock._time;
   if (node._age < time) {
-    node._state |= 2;
-    node._dependents++;
+    node._state |= 2; // pending
     /** @type {Array<number>} */
-    const slots = node._dependentslots;
+    let slots = node._dependentslots;
     if (slots === null) {
-      node._dependentslots = [Slot];
-    } else {
-      slots.push(Slot);
+      slots = node._dependentslots = [];
     }
+    slots[node._dependents++] = Slot;
     setDownstreamState(node, true);
   }
 }
@@ -914,7 +892,7 @@ function setDownstreamState(node, pending) {
     /** @type {number} */
     const slot = Slot;
     Slot = updates._count - 1;
-    markDownstreamComputations(node, pending, false);
+    markDownstreamComputations(node, true, false);
     Slot = slot;
   } else {
     markDownstreamComputations(node, pending, false);
@@ -950,7 +928,7 @@ function markDownstreamComputations(node, onchange, dirty) {
   if (owned !== null) {
     /** @type {boolean} */
     const pending = onchange && !dirty;
-    markForDisposal(owned, pending, pending ? 0 : RootClock._time, pending ? Slot : 0);
+    markForDisposal(owned, pending, RootClock._time, Slot);
   }
   /** @type {Log} */
   const log = node._log;
@@ -990,10 +968,13 @@ function markForDisposal(children, pending, time, slot) {
     /** @type {!Computation} */
     const child = children[i];
     if (pending) {
-      child._state |= 4;
+      // pending disposal
+      child._state |= 4; 
+      child._ownerage = time;
       child._ownerslot = slot;
     } else {
-      child._state = 0;
+       // disposed
+      child._state = 16;
       child._age = time;
     }
     /** @type {Array<!Computation>} */
@@ -1005,31 +986,38 @@ function markForDisposal(children, pending, time, slot) {
 }
 
 /**
- * 
+ * Updates upstream dependencies before applying
+ * update to current computation node.
  * @param {Computation} node 
  * @param {!Array<!Computation>} updates
  */
 function applyUpstreamUpdates(node, updates) {
-  if ((node._state & 4) !== 0) {
-    /** @type {Computation} */
-    const owner = updates[node._ownerslot];
-    if (owner !== null) {
-      applyUpstreamUpdates(owner, updates);
-    }
-  }
-  if ((node._state & 2) !== 0) {
-    const slots = /** @type {!Array<number>} */(node._dependentslots);
-    /** @type {number} */
-    const ln = slots.length;
-    for (let /** number */ i = ln - node._dependents; i < ln; i++) {
-      /** @type {!Computation} */
-      const dependency = updates[slots[i]];
-      if (dependency !== null) {
-        applyUpstreamUpdates(dependency, updates);
+  /* 
+    In case we try to access a pending node's value 
+    after its pending owner updates the node in owner slot 
+    will have completed and been set to null, so need to check for null.
+  */
+  if (node != null) {
+    if ((node._state & 4) !== 0) {
+      if (node._ownerage === RootClock._time) {
+        applyUpstreamUpdates(updates[node._ownerslot], updates);
+      } else {
+        /* 
+          This node was marked for disposal in a previous tick 
+          by a pending computation that did not update.
+        */
+        node._state &= ~4;
+        node._ownerage = node._ownerslot = -1;
       }
     }
+    if ((node._state & 2) !== 0) {
+      const slots = /** @type {!Array<number>} */(node._dependentslots);
+      for (let /** number */ i = node._dependentslot, /** number */ ln = node._dependents; i < ln; i++) {
+        applyUpstreamUpdates(updates[slots[i]], updates);
+      }
+    }
+    applyComputationUpdate(node);
   }
-  applyComputationUpdate(node);
 }
 
 /**
@@ -1107,9 +1095,18 @@ function cleanupSource(source, slot) {
  * 
  * @param {!Computation} node 
  */
+function restore(node) {
+  node._state &= ~14;
+  node._ownerslot = node._ownerage = -1;
+  node._dependents = node._dependentslot = 0;
+}
+
+/**
+ * 
+ * @param {!Computation} node 
+ */
 function disposeComputation(node) {
-  node._fn = null;
-  node._log = null;
+  node._log = node._fn = node._dependentslots = null;
   cleanup(node, true);
 }
 

@@ -63,7 +63,9 @@
             this._sources = null;
             this._sourceslots = null;
             this._ownerslot = -1;
+            this._ownerage = -1;
             this._dependents = 0;
+            this._dependentslot = 0;
             this._dependentslots = null;
             this._log = null;
             this._owned = null;
@@ -77,7 +79,9 @@
                 if (this._age === RootClock._time && this._state === 8) {
                     throw new Error("Circular dependency.");
                 }
-                logDataRead(this);
+                if (this._state !== 16) {
+                    logDataRead(this);
+                }
             }
             return this._value;
         };
@@ -209,22 +213,18 @@
                 var ln = array.length;
                 var out = new Array(ln);
                 for (var i = 0; i < ln; i++) {
-                    out[i] = (normalizeBinding(array[i], true));
+                    out[i] = array[i].get();
                 }
                 return out;
             }
         };
     };
-    S.bind = function (ev) {
-        return normalizeBinding(ev);
-    };
-    S.call = function (ev) {
-        return (normalizeBinding(ev, true));
+    S.wrap = function (node, selector) {
+        return { get: function () { return selector(node.get()); } };
     };
     S.on = function (ev, fn, seed, track, onchanges, comparer) {
-        var sgn = (normalizeBinding(ev));
         var on = function (seed) {
-            var result = sgn.get();
+            var result = ev.get();
             if (onchanges) {
                 onchanges = false;
             }
@@ -264,7 +264,7 @@
         var listener = Listener;
         try {
             Listener = null;
-            return (normalizeBinding(fn, true));
+            return fn.get();
         }
         finally {
             Listener = listener;
@@ -348,14 +348,6 @@
             return (node);
         }
         return new Computation();
-    }
-    function normalizeBinding(data, call) {
-        var type = typeof data;
-        return (type === 'object' ?
-            call ? (data).get() : (data) :
-            type === 'function' ?
-                call ? (data)() : { get: (data) } :
-                (data));
     }
     function recycleOrClaimNode(node, fn, value, orphan) {
         var _owner = (orphan || Owner === null || Owner === NOT_OWNED) ? null : Owner;
@@ -512,10 +504,8 @@
     }
     function applyComputationUpdate(node) {
         if ((node._state & 2) !== 0) {
-            if (--node._dependents === 0) {
-                node._state &= ~6;
-                node._ownerslot = -1;
-                node._dependentslots = null;
+            if (++node._dependentslot === node._dependents) {
+                restore(node);
             }
         }
         else if ((node._state & 1) !== 0) {
@@ -538,9 +528,7 @@
         node._state = 8;
         cleanup(node, false);
         node._value = node._fn(node._value);
-        node._state = 0;
-        node._dependents = 0;
-        node._dependentslots = null;
+        restore(node);
         Owner = owner;
         Listener = listener;
         return value;
@@ -557,14 +545,11 @@
         var time = RootClock._time;
         if (node._age < time) {
             node._state |= 2;
-            node._dependents++;
             var slots = node._dependentslots;
             if (slots === null) {
-                node._dependentslots = [Slot];
+                slots = node._dependentslots = [];
             }
-            else {
-                slots.push(Slot);
-            }
+            slots[node._dependents++] = Slot;
             setDownstreamState(node, true);
         }
     }
@@ -574,7 +559,7 @@
         if (node._onchange) {
             var slot = Slot;
             Slot = updates._count - 1;
-            markDownstreamComputations(node, pending, false);
+            markDownstreamComputations(node, true, false);
             Slot = slot;
         }
         else {
@@ -597,7 +582,7 @@
         var owned = node._owned;
         if (owned !== null) {
             var pending_1 = onchange && !dirty;
-            markForDisposal(owned, pending_1, pending_1 ? 0 : RootClock._time, pending_1 ? Slot : 0);
+            markForDisposal(owned, pending_1, RootClock._time, Slot);
         }
         var log = node._log;
         if (log !== null) {
@@ -621,10 +606,11 @@
             var child = children[i];
             if (pending) {
                 child._state |= 4;
+                child._ownerage = time;
                 child._ownerslot = slot;
             }
             else {
-                child._state = 0;
+                child._state = 16;
                 child._age = time;
             }
             var owned = child._owned;
@@ -634,23 +620,24 @@
         }
     }
     function applyUpstreamUpdates(node, updates) {
-        if ((node._state & 4) !== 0) {
-            var owner = updates[node._ownerslot];
-            if (owner !== null) {
-                applyUpstreamUpdates(owner, updates);
-            }
-        }
-        if ((node._state & 2) !== 0) {
-            var slots = (node._dependentslots);
-            var ln = slots.length;
-            for (var i = ln - node._dependents; i < ln; i++) {
-                var dependency = updates[slots[i]];
-                if (dependency !== null) {
-                    applyUpstreamUpdates(dependency, updates);
+        if (node != null) {
+            if ((node._state & 4) !== 0) {
+                if (node._ownerage === RootClock._time) {
+                    applyUpstreamUpdates(updates[node._ownerslot], updates);
+                }
+                else {
+                    node._state &= ~4;
+                    node._ownerage = node._ownerslot = -1;
                 }
             }
+            if ((node._state & 2) !== 0) {
+                var slots = (node._dependentslots);
+                for (var i = node._dependentslot, ln = node._dependents; i < ln; i++) {
+                    applyUpstreamUpdates(updates[slots[i]], updates);
+                }
+            }
+            applyComputationUpdate(node);
         }
-        applyComputationUpdate(node);
     }
     function cleanup(node, final) {
         var i;
@@ -703,9 +690,13 @@
             }
         }
     }
+    function restore(node) {
+        node._state &= ~14;
+        node._ownerslot = node._ownerage = -1;
+        node._dependents = node._dependentslot = 0;
+    }
     function disposeComputation(node) {
-        node._fn = null;
-        node._log = null;
+        node._log = node._fn = node._dependentslots = null;
         cleanup(node, true);
     }
 
