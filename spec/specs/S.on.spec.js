@@ -84,7 +84,7 @@ describe("S.on(...)", function () {
     it("suppresses initial run when onchanges is true", function () {
         S.root(function () {
             var a = new Data(1),
-                c = S.on(a, function (v) { return v * 2; }, 0, false, true);
+                c = S.onchange(a, function (v) { return v * 2; }, 0);
            
             expect(c.get()).toBe(0);
 

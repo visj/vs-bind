@@ -10,7 +10,7 @@ class IComputation {
   get() { }
 }
 
-/** @record */
+/** @interface */
 class ISwitch {
 
 
@@ -46,21 +46,16 @@ class ISwitch {
    */
   join(array) { }
 
-
   /**
-   * @template T
-   * @param {!IComputation<T>|(function(): T)|T} ev 
+   * @template T,U
+   * @param {!IComputation<U>} ev
+   * @param {(function(U): T)|(function(U, T): T)} fn
+   * @param {T=} seed 
+   * @param {boolean=} track
+   * @param {function(T, T): boolean=} comparer
    * @return {!IComputation<T>}
    */
-  bind(ev) { }
-
-  /**
-   * @template T 
-   * @param {!IComputation<T>|(function(): T)|T} ev 
-   * @return {T}
-   */
-  call(ev) { }
-
+  on(ev, fn, seed, track, comparer) { }
 
   /**
    * @template T,U
@@ -68,11 +63,10 @@ class ISwitch {
    * @param {(function(U): T)|(function(U, T): T)} fn
    * @param {T=} seed 
    * @param {boolean=} track
-   * @param {boolean=} onchanges  
    * @param {function(T, T): boolean=} comparer
    * @return {!IComputation<T>}
    */
-  on(ev, fn, seed, track, onchanges, comparer) { }
+  onchange(ev, fn, seed, track, comparer) { }
 
 
   /**

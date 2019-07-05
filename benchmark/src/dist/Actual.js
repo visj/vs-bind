@@ -62,11 +62,11 @@
             this._source1slot = 0;
             this._sources = null;
             this._sourceslots = null;
+            this._owner = null;
             this._ownerslot = -1;
-            this._ownerage = -1;
-            this._dependents = 0;
+            this._dependents = null;
             this._dependentslot = 0;
-            this._dependentslots = null;
+            this._dependentcount = 0;
             this._log = null;
             this._owned = null;
             this._cleanups = null;
@@ -79,7 +79,7 @@
                 if (this._age === RootClock._time && this._state === 8) {
                     throw new Error("Circular dependency.");
                 }
-                if (this._state !== 16) {
+                if ((this._state & 16) === 0) {
                     logDataRead(this);
                 }
             }
@@ -165,7 +165,7 @@
     var RunningClock = null;
     var Owner = null;
     var Listener = null;
-    var Slot = 0;
+    var Pending = null;
     var Recycled = null;
     var S = {};
     S.run = function (fn, seed) {
@@ -219,28 +219,11 @@
             }
         };
     };
-    S.wrap = function (node, selector) {
-        return { get: function () { return selector(node.get()); } };
+    S.on = function (ev, fn, seed, track, comparer) {
+        return bindComputation(ev, fn, seed, track, comparer);
     };
-    S.on = function (ev, fn, seed, track, onchanges, comparer) {
-        var on = function (seed) {
-            var result = ev.get();
-            if (onchanges) {
-                onchanges = false;
-            }
-            else {
-                var listener = Listener;
-                try {
-                    Listener = null;
-                    seed = fn(result, seed);
-                }
-                finally {
-                    Listener = listener;
-                }
-            }
-            return seed;
-        };
-        return track ? S.track(on, seed, comparer) : S.run(on, seed);
+    S.onchange = function (ev, fn, seed, track, comparer) {
+        return bindComputation(ev, fn, seed, track, comparer, true);
     };
     S.freeze = function (fn) {
         var result;
@@ -289,6 +272,7 @@
     S.dispose = function (node) {
         if (node instanceof Computation) {
             if (RunningClock !== null) {
+                node._state |= 16;
                 RootClock._disposes.enqueue(node);
             }
             else {
@@ -315,6 +299,26 @@
             finishToplevelComputation(owner, listener);
         }
         return recycled ? { get: function () { return value; } } : node;
+    }
+    function bindComputation(ev, fn, seed, track, comparer, onchanges) {
+        var handler = function (seed) {
+            var result = ev.get();
+            if (onchanges) {
+                onchanges = false;
+            }
+            else {
+                var listener = Listener;
+                try {
+                    Listener = null;
+                    seed = fn(result, seed);
+                }
+                finally {
+                    Listener = listener;
+                }
+            }
+            return seed;
+        };
+        return track ? S.track(handler, seed, comparer) : S.run(handler, seed);
     }
     function execToplevelComputation(fn, value) {
         var clock = RootClock;
@@ -387,11 +391,16 @@
             node._value = value;
             node._age = RootClock._time;
             if (_owner !== null) {
-                if (_owner._owned === null) {
+                node._owner = _owner;
+                var owned = _owner._owned;
+                if (owned === null) {
                     _owner._owned = [node];
+                    node._ownerslot = 0;
                 }
                 else {
-                    _owner._owned.push(node);
+                    var slot = owned.length;
+                    owned[slot] = node;
+                    node._ownerslot = slot;
                 }
             }
         }
@@ -406,10 +415,12 @@
     }
     function liftComputation(node) {
         if ((node._state & 6) !== 0) {
-            var queue = RootClock._updates;
-            applyUpstreamUpdates(node, queue._items);
+            applyUpstreamUpdates(node);
         }
-        applyComputationUpdate(node);
+        if ((node._state & 1) !== 0) {
+            applyComputationUpdate(node);
+        }
+        resetComputation(node);
     }
     function logRead(from) {
         var fromslot;
@@ -503,20 +514,25 @@
         }
     }
     function applyComputationUpdate(node) {
-        if ((node._state & 2) !== 0) {
-            if (++node._dependentslot === node._dependents) {
-                restore(node);
-            }
-        }
-        else if ((node._state & 1) !== 0) {
-            if (node._onchange) {
-                var current = updateComputation(node);
-                if (node._comparer != null ? node._comparer(current, node._value) : node._value !== current) {
-                    markDownstreamComputations(node, false, true);
+        var state = node._state;
+        if ((state & 16) === 0) {
+            if ((state & 2) !== 0) {
+                node._dependents[node._dependentslot++] = null;
+                if (node._dependentslot === node._dependentcount) {
+                    resetComputation(node);
                 }
             }
-            else {
-                updateComputation(node);
+            else if ((state & 1) !== 0) {
+                if (node._onchange) {
+                    var current = updateComputation(node);
+                    var comparer = node._comparer;
+                    if (comparer ? !comparer(current, node._value) : node._value !== current) {
+                        markDownstreamComputations(node, false, true);
+                    }
+                }
+                else {
+                    updateComputation(node);
+                }
             }
         }
     }
@@ -528,7 +544,7 @@
         node._state = 8;
         cleanup(node, false);
         node._value = node._fn(node._value);
-        restore(node);
+        resetComputation(node);
         Owner = owner;
         Listener = listener;
         return value;
@@ -545,22 +561,21 @@
         var time = RootClock._time;
         if (node._age < time) {
             node._state |= 2;
-            var slots = node._dependentslots;
-            if (slots === null) {
-                slots = node._dependentslots = [];
+            var dependents = node._dependents;
+            if (dependents === null) {
+                dependents = node._dependents = [];
             }
-            slots[node._dependents++] = Slot;
+            dependents[node._dependentcount++] = Pending;
             setDownstreamState(node, true);
         }
     }
     function setDownstreamState(node, pending) {
-        var updates = RootClock._updates;
-        updates.enqueue(node);
+        RootClock._updates.enqueue(node);
         if (node._onchange) {
-            var slot = Slot;
-            Slot = updates._count - 1;
+            var pending_1 = Pending;
+            Pending = node;
             markDownstreamComputations(node, true, false);
-            Slot = slot;
+            Pending = pending_1;
         }
         else {
             markDownstreamComputations(node, pending, false);
@@ -581,8 +596,8 @@
     function markDownstreamComputations(node, onchange, dirty) {
         var owned = node._owned;
         if (owned !== null) {
-            var pending_1 = onchange && !dirty;
-            markForDisposal(owned, pending_1, RootClock._time, Slot);
+            var pending_2 = onchange && !dirty;
+            markForDisposal(owned, pending_2, RootClock._time);
         }
         var log = node._log;
         if (log !== null) {
@@ -601,42 +616,38 @@
             }
         }
     }
-    function markForDisposal(children, pending, time, slot) {
+    function markForDisposal(children, pending, time) {
         for (var i = 0, ln = children.length; i < ln; i++) {
             var child = children[i];
-            if (pending) {
-                child._state |= 4;
-                child._ownerage = time;
-                child._ownerslot = slot;
-            }
-            else {
-                child._state = 16;
-                child._age = time;
-            }
-            var owned = child._owned;
-            if (owned !== null) {
-                markForDisposal(owned, pending, time, slot);
+            if (child !== null) {
+                if (pending) {
+                    child._state |= 4;
+                }
+                else {
+                    child._age = time;
+                    child._state = 16;
+                }
+                var owned = child._owned;
+                if (owned !== null) {
+                    markForDisposal(owned, pending, time);
+                }
             }
         }
     }
-    function applyUpstreamUpdates(node, updates) {
-        if (node != null) {
-            if ((node._state & 4) !== 0) {
-                if (node._ownerage === RootClock._time) {
-                    applyUpstreamUpdates(updates[node._ownerslot], updates);
-                }
-                else {
-                    node._state &= ~4;
-                    node._ownerage = node._ownerslot = -1;
-                }
+    function applyUpstreamUpdates(node) {
+        if ((node._state & 4) !== 0) {
+            var owner = node._owner;
+            if ((owner._state & 6) !== 0) {
+                liftComputation(owner);
             }
-            if ((node._state & 2) !== 0) {
-                var slots = (node._dependentslots);
-                for (var i = node._dependentslot, ln = node._dependents; i < ln; i++) {
-                    applyUpstreamUpdates(updates[slots[i]], updates);
-                }
+            node._state &= ~4;
+        }
+        if ((node._state & 2) !== 0) {
+            var slots = (node._dependents);
+            for (var i = node._dependentslot, ln = node._dependentcount; i < ln; i++) {
+                liftComputation((slots[i]));
+                slots[i] = null;
             }
-            applyComputationUpdate(node);
         }
     }
     function cleanup(node, final) {
@@ -690,14 +701,24 @@
             }
         }
     }
-    function restore(node) {
+    function resetComputation(node) {
         node._state &= ~14;
-        node._ownerslot = node._ownerage = -1;
-        node._dependents = node._dependentslot = 0;
+        node._dependentslot = 0;
+        node._dependentcount = 0;
     }
     function disposeComputation(node) {
-        node._log = node._fn = node._dependentslots = null;
+        node._fn = null;
+        node._log = null;
+        node._dependents = null;
+        var owner = node._owner;
+        if (owner !== null) {
+            if (owner._owned[node._ownerslot] === node) {
+                owner._owned[node._ownerslot] = null;
+            }
+            node._owner = null;
+        }
         cleanup(node, true);
+        resetComputation(node);
     }
 
     var __extends$1 = (undefined && undefined.__extends) || (function () {

@@ -9,8 +9,9 @@ interface ISwitch {
   track<T>(fn: () => T): IComputation<T>;
   track<T>(fn: (seed: T) => T, seed: T): IComputation<T>;
   on<T, U>(ev: IComputation<U>, fn: (result: U) => T): IComputation<T>;
-  on<T, U>(ev: IComputation<U>, fn: (result: U, seed: T) => T, seed: T, track?: boolean, onchanges?: boolean, comparer?: (previous: T, current: T) => boolean): IComputation<T>;
-  wrap<T, U>(node: IComputation<T>, selector: (node: T) => U): IComputation<U>;
+  on<T, U>(ev: IComputation<U>, fn: (result: U, seed: T) => T, seed: T, track?: boolean, comparer?: (previous: T, current: T) => boolean): IComputation<T>;
+  onchange<T, U>(ev: IComputation<U>, fn: (result: U) => T): IComputation<T>;
+  onchange<T, U>(ev: IComputation<U>, fn: (result: U, seed: T) => T, seed: T, track?: boolean, comparer?: (previous: T, current: T) => boolean): IComputation<T>;
   join<T extends Array<IComputation>>(array: T): IComputation<T extends Array<IComputation<infer U>> ? U[] : any>;
   frozen(): boolean;
   listening(): boolean;
