@@ -716,6 +716,7 @@ function recycleOrClaimNode(node, fn, value, orphan) {
     /** @type {number} */
     let k;
     Recycled = node;
+    resetComputation(node, 31);
     if (_owner !== null) {
       if (node._owned !== null) {
         if (_owner._owned === null) {
@@ -786,7 +787,7 @@ function liftComputation(node) {
   if ((node._state & 1) !== 0) {
     applyComputationUpdate(node);
   }
-  resetComputation(node);
+  resetComputation(node, 31);
 }
 
 /**
@@ -915,7 +916,7 @@ function applyComputationUpdate(node) {
     if ((state & 2) !== 0) { // pending
       node._dependents[node._dependentslot++] = null;
       if (node._dependentslot === node._dependentcount) {
-        resetComputation(node);
+        resetComputation(node, 14);
       }
     } else if ((state & 1) !== 0) { // stale
       if (node._onchange) {
@@ -949,7 +950,7 @@ function updateComputation(node) {
   node._state = 8; // running
   cleanup(node, false);
   node._value = node._fn(node._value);
-  resetComputation(node);
+  resetComputation(node, 31);
   Owner = owner;
   Listener = listener;
   return value;
@@ -1100,7 +1101,7 @@ function applyUpstreamUpdates(node) {
   if ((node._state & 4) !== 0) {
     /** @type {Computation} */
     const owner = node._owner;
-    if ((owner._state & 6) !== 0) {
+    if ((owner._state & 7) !== 0) {
       liftComputation(owner);
     }
     node._state &= ~4;
@@ -1188,9 +1189,10 @@ function cleanupSource(source, slot) {
 /**
  * 
  * @param {!Computation} node 
+ * @param {number} flags
  */
-function resetComputation(node) {
-  node._state &= ~14;
+function resetComputation(node, flags) {
+  node._state &= ~flags;
   node._dependentslot = 0;
   node._dependentcount = 0;
 }
@@ -1212,7 +1214,7 @@ function disposeComputation(node) {
     node._owner = null;
   }
   cleanup(node, true);
-  resetComputation(node);
+  resetComputation(node, 31);
 }
 
 /**

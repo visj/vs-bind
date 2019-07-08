@@ -62,6 +62,7 @@
             this._source1slot = 0;
             this._sources = null;
             this._sourceslots = null;
+            this._root = null;
             this._owner = null;
             this._ownerslot = -1;
             this._dependents = null;
@@ -70,6 +71,7 @@
             this._log = null;
             this._owned = null;
             this._cleanups = null;
+            this._hooks = null;
         }
         Computation.prototype.get = function () {
             if (Listener !== null) {
@@ -79,7 +81,7 @@
                 if (this._age === RootClock._time && this._state === 8) {
                     throw new Error("Circular dependency.");
                 }
-                if ((this._state & 16) === 0) {
+                if ((this._state & 32) === 0) {
                     logDataRead(this);
                 }
             }
@@ -125,6 +127,8 @@
         function Clock() {
             this._time = 0;
             this._changes = new Queue();
+            this._enters = new Queue();
+            this._exits = new Queue();
             this._updates = new Queue();
             this._disposes = new Queue();
         }
@@ -163,6 +167,7 @@
     var NOT_OWNED = new Computation();
     var RootClock = new Clock();
     var RunningClock = null;
+    var Root = null;
     var Owner = null;
     var Listener = null;
     var Pending = null;
@@ -179,12 +184,28 @@
         }
         return makeComputationNode(fn, seed, node);
     };
+    S.scope = function (fn) {
+        var node = getCandidateNode();
+        var root = Root;
+        try {
+            Root = node;
+            return fn();
+        }
+        finally {
+            Root = root;
+        }
+    };
     S.root = function (fn) {
         var undisposed = fn.length === 0;
         var node = undisposed ? NOT_OWNED : getCandidateNode();
         var disposer = undisposed ? null : function () {
             if (node !== null) {
                 if (RunningClock !== null) {
+                    node._state |= 32;
+                    var owned = node._owned;
+                    if (owned !== null) {
+                        markForDisposal(owned, false, RootClock._time);
+                    }
                     RootClock._disposes.enqueue(node);
                 }
                 else {
@@ -269,10 +290,21 @@
             }
         }
     };
+    S.hook = function (tuple) {
+        if (Root !== null) {
+            var hooks = Root._hooks;
+            if (hooks === null) {
+                Root._hooks = [tuple];
+            }
+            else {
+                hooks.push(tuple);
+            }
+        }
+    };
     S.dispose = function (node) {
         if (node instanceof Computation) {
             if (RunningClock !== null) {
-                node._state |= 16;
+                node._state |= 32;
                 RootClock._disposes.enqueue(node);
             }
             else {
@@ -287,6 +319,7 @@
         return Listener !== null;
     };
     function makeComputationNode(fn, value, node) {
+        node._root = Root;
         var owner = Owner;
         var listener = Listener;
         var toplevel = RunningClock === null;
@@ -420,7 +453,7 @@
         if ((node._state & 1) !== 0) {
             applyComputationUpdate(node);
         }
-        resetComputation(node);
+        resetComputation(node, 14);
     }
     function logRead(from) {
         var fromslot;
@@ -492,20 +525,35 @@
         var count = 0;
         var running = RunningClock;
         var changes = clock._changes;
+        var enters = clock._enters;
         var updates = clock._updates;
         var disposes = clock._disposes;
+        var exits = clock._exits;
         disposes.reset();
         RunningClock = clock;
-        while (changes._count !== 0 || updates._count !== 0 || disposes._count !== 0) {
-            clock._time++;
-            changes.run(applyDataUpdate);
-            updates.run(applyComputationUpdate);
-            disposes.run(disposeComputation);
-            if (count++ > 1e5) {
-                throw new Error("Runaway clock detected");
+        try {
+            while (changes._count > 0 || updates._count > 0 || disposes._count > 0) {
+                clock._time++;
+                changes.run(applyDataUpdate);
+                enters.run(applyHookEnter);
+                updates.run(applyComputationUpdate);
+                disposes.run(disposeComputation);
+                exits.run(applyHookExit);
+                if (count++ > 1e5) {
+                    throw new Error("Runaway clock detected");
+                }
             }
         }
-        RunningClock = running;
+        finally {
+            try {
+                if (exits._count > 0) {
+                    exits.run(applyHookExit);
+                }
+            }
+            finally {
+                RunningClock = running;
+            }
+        }
     }
     function applyDataUpdate(data) {
         data.update();
@@ -515,11 +563,11 @@
     }
     function applyComputationUpdate(node) {
         var state = node._state;
-        if ((state & 16) === 0) {
+        if ((state & 32) === 0) {
             if ((state & 2) !== 0) {
                 node._dependents[node._dependentslot++] = null;
                 if (node._dependentslot === node._dependentcount) {
-                    resetComputation(node);
+                    resetComputation(node, 14);
                 }
             }
             else if ((state & 1) !== 0) {
@@ -536,6 +584,29 @@
             }
         }
     }
+    function applyHookEnter(node) {
+        applyComputationHook(node, 0);
+    }
+    function applyHookExit(node) {
+        applyComputationHook(node, 1);
+    }
+    function applyComputationHook(node, index) {
+        var state = node._state;
+        if ((state & 16) !== 0 && (state & 32) === 0) {
+            var hooks = node._hooks;
+            if (hooks != null) {
+                for (var i = 0, ln = hooks.length; i < ln; i++) {
+                    var hook = hooks[i];
+                    if (hook != null) {
+                        var hookFn = hook[index];
+                        if (hookFn != null) {
+                            hookFn();
+                        }
+                    }
+                }
+            }
+        }
+    }
     function updateComputation(node) {
         var value = node._value;
         var owner = Owner;
@@ -544,7 +615,7 @@
         node._state = 8;
         cleanup(node, false);
         node._value = node._fn(node._value);
-        resetComputation(node);
+        resetComputation(node, 14);
         Owner = owner;
         Listener = listener;
         return value;
@@ -594,6 +665,14 @@
         }
     }
     function markDownstreamComputations(node, onchange, dirty) {
+        var root = node._root;
+        if (root !== null) {
+            if ((root._state & 16) === 0) {
+                root._state |= 16;
+                RootClock._enters.enqueue(root);
+                RootClock._exits.enqueue(root);
+            }
+        }
         var owned = node._owned;
         if (owned !== null) {
             var pending_2 = onchange && !dirty;
@@ -625,7 +704,7 @@
                 }
                 else {
                     child._age = time;
-                    child._state = 16;
+                    child._state = 32;
                 }
                 var owned = child._owned;
                 if (owned !== null) {
@@ -637,7 +716,7 @@
     function applyUpstreamUpdates(node) {
         if ((node._state & 4) !== 0) {
             var owner = node._owner;
-            if ((owner._state & 6) !== 0) {
+            if ((owner._state & 7) !== 0) {
                 liftComputation(owner);
             }
             node._state &= ~4;
@@ -701,8 +780,8 @@
             }
         }
     }
-    function resetComputation(node) {
-        node._state &= ~14;
+    function resetComputation(node, flags) {
+        node._state &= ~flags;
         node._dependentslot = 0;
         node._dependentcount = 0;
     }
@@ -718,7 +797,7 @@
             node._owner = null;
         }
         cleanup(node, true);
-        resetComputation(node);
+        resetComputation(node, 63);
     }
 
     var __extends$1 = (undefined && undefined.__extends) || (function () {
