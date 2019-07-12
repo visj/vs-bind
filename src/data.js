@@ -88,13 +88,15 @@ class Computation {
   /** @return {T} */
   get() {
     if (Listener !== null) {
-      if ((this._state & 7) !== 0) {
+      /** @type {number} */
+      const state = this._state;
+      if ((state & 7) !== 0) {
         liftComputation(this);
       }
-      if (this._age === RootClock._time && this._state === 8) {
+      if (this._age === RootClock._time && state === 8) {
         throw new Error("Circular dependency.");
       }
-      if ((this._state & 16) === 0) {
+      if ((state & 16) === 0) {
         logDataRead(this);
       }
     }
@@ -479,9 +481,6 @@ S.cleanup = function (fn) {
 S.dispose = function (node) {
   if (node instanceof Computation) {
     if (RunningClock !== null) {
-      // ensures this node does not update 
-      // despite being accessed before dispose is called
-      node._state |= 16;
       RootClock._disposes.enqueue(node);
     } else {
       disposeComputation(node);
@@ -999,8 +998,10 @@ function markForDisposal(children, pending, time) {
     const child = children[i];
     if (child !== null) {
       if (pending) {
-        // pending disposal
-        child._state |= 4;
+        if ((child._state & 16) === 0) {
+          // pending disposal
+          child._state |= 4;
+        }
       } else {
         // disposed
         child._age = time;
@@ -1128,14 +1129,6 @@ function disposeComputation(node) {
   node._fn = null;
   node._log = null;
   node._dependents = null;
-  /** @type {Computation} */
-  const owner = node._owner;
-  if (owner !== null) {
-    if (owner._owned[node._ownerslot] === node) {
-      owner._owned[node._ownerslot] = null;
-    }
-    node._owner = null;
-  }
   cleanup(node, true);
   resetComputation(node, 31);
 }
