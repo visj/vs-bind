@@ -914,7 +914,10 @@ function applyComputationUpdate(node) {
         resetComputation(node, 14);
       }
     } else if ((state & 1) !== 0) { // stale
-      if (node._onchange) {
+      if ((state & 4) !== 0) {
+        // make sure this node is not pending disposal
+        liftComputation(node);
+      } else if (node._onchange) {
         /** @type {T} */
         const current = updateComputation(node);
         /** @type {(function(T, T): boolean)|null} */
@@ -1106,9 +1109,14 @@ function applyUpstreamUpdates(node) {
   if ((node._state & 2) !== 0) {
     const slots = /** @type {!Array<Computation>} */(node._dependents);
     for (let /** number */ i = node._dependentslot, /** number */ ln = node._dependentcount; i < ln; i++) {
-      liftComputation(/** @type {!Computation} */(slots[i]));
+      /** @type {Computation} */
+      const slot = slots[i];
+      if (slot != null) {
+        liftComputation(slot);
+      }
       slots[i] = null;
     }
+    node._state &= ~2;
   }
 }
 

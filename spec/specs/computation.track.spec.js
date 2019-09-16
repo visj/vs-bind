@@ -333,6 +333,31 @@ describe('S.track', () => {
       });
     });
 
+    it('is not affected by execution order in freeze', () => {
+      const trigger = new Data(false);
+      const data = new Data(null);
+      const spy = jasmine.createSpy();
+      const cache = S.track(function cache() { return trigger.get(); });
+      const child = function child(data) {
+        S.run(() => {
+          expect(data.get()).toBe('name');
+          S.cleanup(spy);
+        });
+        return 'Hi';
+      };
+      const memo = S.run(function memo() { return cache.get() ? child(data) : undefined; });
+      S.run(function view() { memo.get(); });
+      S.freeze(() => {
+        data.set('name');
+        trigger.set(true);
+      });
+      S.freeze(() => {
+        trigger.set(false);
+        data.set(undefined);
+      });
+      expect(spy.calls.count()).toBe(1);
+    });
+
   });
 
   describe("with unending changes", function () {
